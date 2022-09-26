@@ -70,6 +70,8 @@
 /* Worst case buffer size needed for holding an integer. */
 #define ITOA_MAX_LEN 12
 
+#include "../../arch/x86/kvm/svm/cachepc/kvm.h"
+
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
 
@@ -5792,6 +5794,8 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 	r = kvm_vfio_ops_init();
 	WARN_ON(r);
 
+	cachepc_kvm_init();
+
 	return 0;
 
 out_unreg:
@@ -5820,6 +5824,8 @@ EXPORT_SYMBOL_GPL(kvm_init);
 void kvm_exit(void)
 {
 	int cpu;
+
+	cachepc_kvm_exit();
 
 	debugfs_remove_recursive(kvm_debugfs_dir);
 	misc_deregister(&kvm_dev);
