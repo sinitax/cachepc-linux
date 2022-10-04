@@ -67,6 +67,9 @@
 
 #include <linux/kvm_dirty_ring.h>
 
+#include <linux/sev-step.h>
+#include <linux/userspace_page_track_signals.h>
+
 /* Worst case buffer size needed for holding an integer. */
 #define ITOA_MAX_LEN 12
 

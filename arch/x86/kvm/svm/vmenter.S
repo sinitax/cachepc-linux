@@ -27,49 +27,52 @@
 #define VCPU_R15	__VCPU_REGS_R15 * WORD_SIZE
 #endif
 
+.section .noinstr.text, "ax"
+
+.extern cachepc_msrmts
+.extern cachepc_regs_tmp
+.extern cachepc_regs_vm
+
 .macro load_tmp off reg
-       mov cachepc_regs_tmp(off), reg
+	mov cachepc_regs_tmp+\off(%rip), \reg
 .endm
 
 .macro save_tmp off reg
-       mov reg, cachepc_regs_tmp(off)
+	mov \reg, cachepc_regs_tmp+\off(%rip)
 .endm
 
 .macro load_vm off reg
-       mov cachepc_regs_vm(off), reg
+	mov cachepc_regs_vm+\off(%rip), \reg
 .endm
 
 .macro save_vm off reg
-       mov reg, cachepc_regs_vm(off)
+	mov \reg, cachepc_regs_vm+\off(%rip)
 .endm
 
 .macro apply_regs func
-       func 0x00, %rax
-       func 0x08, %rbx
-       func 0x10, %rcx
-       func 0x18, %rdx
-       func 0x20, %rbp
-       func 0x28, %rsp
-       func 0x30, %rdi
-       func 0x38, %rsi
-       func 0x40, %r8
-       func 0x48, %r9
-       func 0x50, %r10
-       func 0x58, %r11
-       func 0x60, %r12
-       func 0x68, %r13
-       func 0x70, %r14
-       func 0x78, %r15
+	\func 0x00, %rax
+	\func 0x08, %rbx
+	\func 0x10, %rcx
+	\func 0x18, %rdx
+	\func 0x20, %rbp
+	\func 0x28, %rsp
+	\func 0x30, %rdi
+	\func 0x38, %rsi
+	\func 0x40, %r8
+	\func 0x48, %r9
+	\func 0x50, %r10
+	\func 0x58, %r11
+	\func 0x60, %r12
+	\func 0x68, %r13
+	\func 0x70, %r14
+	\func 0x78, %r15
 .endm
 
 .macro barrier
-       mfence
-       mov $0x80000005,%eax
-       cpuid
+	mfence
+	mov $0x80000005,%eax
+	cpuid
 .endm
-
-
-.section .noinstr.text, "ax"
 
 /**
  * __svm_vcpu_run - Run a vCPU via a transition to SVM guest mode
@@ -125,26 +128,26 @@ SYM_FUNC_START(__svm_vcpu_run)
 	sti
 
 1:	
-	//apply_regs save_vm
-	//apply_regs load_tmp
-	//mov cachepc_ds, %rsi
-	//mov 0x8(%rsi), %r15
-	//lea sev_prime_ret(%rip), %rdi
-	//jmp cachepc_prime_vcall+1 // skip stack pushs
-//sev_prime_ret:
-	//apply_regs save_tmp
-	//apply_regs load_vm
+	apply_regs save_vm
+	apply_regs load_tmp
+	mov cachepc_ds, %rsi
+	mov 0x8(%rsi), %r15
+	lea sev_prime_ret(%rip), %rdi
+	jmp cachepc_prime_vcall+5+1 // skip stack pushs
+sev_prime_ret:
+	apply_regs save_tmp
+	apply_regs load_vm
 
 	vmrun %_ASM_AX
 
-//       apply_regs save_vm
-//       apply_regs load_tmp
-//       mov %r15, %rsi
-//       lea sev_probe_ret(%rip), %rdi
-//       jmp cachepc_probe_vcall+6 // skip stack pushs
-//sev_probe_ret:
-//       apply_regs save_tmp
-//       apply_regs load_vm
+	apply_regs save_vm
+	apply_regs load_tmp
+	mov %r15, %rsi
+	lea sev_probe_ret(%rip), %rdi
+	jmp cachepc_probe_vcall+5+8 // skip stack pushs
+sev_probe_ret:
+	apply_regs save_tmp
+	apply_regs load_vm
 
 2:	cli
 
@@ -249,26 +252,26 @@ SYM_FUNC_START(__svm_sev_es_vcpu_run)
 
 1:	
 
-//       apply_regs save_vm
-//       apply_regs load_tmp
-//       mov cachepc_ds, %rsi
-//       mov 0x8(%rsi), %r15
-//       lea sev_es_prime_ret(%rip), %rdi
-//       jmp cachepc_prime_vcall+1 // skip stack pushes
-//sev_es_prime_ret:
-//       apply_regs save_tmp
-//       apply_regs load_vm
-//
-       vmrun %_ASM_AX
-//
-//       apply_regs save_vm
-//       apply_regs load_tmp
-//       mov %r15, %rsi
-//       lea sev_es_probe_ret(%rip), %rdi
-//       jmp cachepc_probe_vcall+6 // skip stack pushs
-//sev_es_probe_ret:
-//       apply_regs save_tmp
-//       apply_regs load_vm
+	apply_regs save_vm
+	apply_regs load_tmp
+	mov cachepc_ds, %rsi
+	mov 0x8(%rsi), %r15
+	lea sev_es_prime_ret(%rip), %rdi
+	jmp cachepc_prime_vcall+5+1 // skip stack pushes
+sev_es_prime_ret:
+	apply_regs save_tmp
+	apply_regs load_vm
+
+	vmrun %_ASM_AX
+
+	apply_regs save_vm
+	apply_regs load_tmp
+	mov %r15, %rsi
+	lea sev_es_probe_ret(%rip), %rdi
+	jmp cachepc_probe_vcall+5+8 // skip stack pushs
+sev_es_probe_ret:
+	apply_regs save_tmp
+	apply_regs load_vm
 
 2:	cli
 
