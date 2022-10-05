@@ -82,7 +82,7 @@
 #include <asm/sgx.h>
 #include <clocksource/hyperv_timer.h>
 
-#include "sevstep/kvm.h"
+#include "sevstep/sevstep.h"
 
 #define CREATE_TRACE_POINTS
 #include "trace.h"
