@@ -19,6 +19,8 @@
 #include "mmu.h"
 #include "mmu_internal.h"
 
+#include "../sevstep/sevstep.h"
+
 bool kvm_page_track_write_tracking_enabled(struct kvm *kvm)
 {
 	return IS_ENABLED(CONFIG_KVM_EXTERNAL_WRITE_TRACKING) ||
@@ -131,10 +133,9 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 	 */
 	kvm_mmu_gfn_disallow_lpage(slot, gfn);
 
-	//if (mode == KVM_PAGE_TRACK_WRITE)
-	//	if (kvm_mmu_slot_gfn_write_protect(kvm, slot, gfn, PG_LEVEL_4K))
-	if (kvm_mmu_slot_gfn_protect(kvm, slot, gfn, PG_LEVEL_4K, mode)) {
-			kvm_flush_remote_tlbs(kvm);
+	if (sevstep_kvm_mmu_slot_gfn_protect(kvm,
+			slot, gfn, PG_LEVEL_4K, mode)) {
+		kvm_flush_remote_tlbs(kvm);
 	}
 }
 EXPORT_SYMBOL_GPL(kvm_slot_page_track_add_page);

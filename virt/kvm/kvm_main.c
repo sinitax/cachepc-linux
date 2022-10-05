@@ -67,13 +67,12 @@
 
 #include <linux/kvm_dirty_ring.h>
 
-#include <linux/sev-step.h>
-#include <linux/userspace_page_track_signals.h>
-
 /* Worst case buffer size needed for holding an integer. */
 #define ITOA_MAX_LEN 12
 
 #include "../../arch/x86/kvm/svm/cachepc/kvm.h"
+#include "../../arch/x86/kvm/sevstep/sevstep.h"
+#include "../../arch/x86/kvm/sevstep/uspt.h"
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");

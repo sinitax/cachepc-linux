@@ -56,9 +56,6 @@
 
 #include "paging.h"
 
-#include <linux/sev-step.h>
-#include <linux/userspace_page_track_signals.h>
-
 extern bool itlb_multihit_kvm_mitigation;
 
 int __read_mostly nx_huge_pages = -1;
@@ -1155,8 +1152,10 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
 	}
 }
 
-/* Apply the protection mode specified in @mode to the specified @sptep,
- * @pt_protect indicates whether
+#include "../sevstep/mmu.c"
+
+/*
+ * Write-protect on the specified @sptep, @pt_protect indicates whether
  * spte write-protection is caused by protecting shadow page table.
  *
  * Note: write protection is difference between dirty logging and spte
@@ -1168,58 +1167,15 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
  *
  * Return true if tlb need be flushed.
  */
-static bool spte_protect(u64 *sptep, bool pt_protect, enum kvm_page_track_mode mode)
+// static bool spte_write_protect(u64 *sptep, bool pt_protect)
+// {
+// 	return sevstep_spte_protect(sptep, pt_protect, KVM_PAGE_TRACK_WRITE);
+// }
+
+static bool rmap_write_protect(struct kvm_rmap_head *rmap_head,
+			       bool pt_protect)
 {
-	u64 spte = *sptep;
-	bool shouldFlush = false;
-
-	if (!is_writable_pte(spte) &&
-	    !(pt_protect && is_mmu_writable_spte(spte)))
-		return false;
-
-	rmap_printk("spte %p %llx\n", sptep, *sptep);
-
-	if (pt_protect){
-		//spte &= ~shadow_mmu_writable_mask;
-		spte &= ~EPT_SPTE_MMU_WRITABLE;
-	}
-	//spte = spte & ~PT_WRITABLE_MASK;
-	if(mode == KVM_PAGE_TRACK_WRITE) {
-		spte = spte & ~PT_WRITABLE_MASK;
-		shouldFlush = true;
-	} else if( mode == KVM_PAGE_TRACK_RESET_ACCESSED) {
-		spte = spte & ~PT_ACCESSED_MASK;
-	} else if(mode == KVM_PAGE_TRACK_ACCESS) {
-		spte = spte & ~PT_PRESENT_MASK;
-		spte = spte & ~PT_WRITABLE_MASK;
-		spte = spte & ~PT_USER_MASK;
-		spte = spte | (0x1ULL << PT64_NX_SHIFT);
-		shouldFlush = true;
-	} else if( mode == KVM_PAGE_TRACK_EXEC) {
-		spte = spte | (0x1ULL << PT64_NX_SHIFT); //nx bit is set, to prevent execution, not removed
-		shouldFlush = true;
-	} else if (mode == KVM_PAGE_TRACK_RESET_EXEC) {
-		spte = spte & (~(0x1ULL << PT64_NX_SHIFT));
-		shouldFlush = true;
-	} else {
-		printk(KERN_WARNING "spte_protect was called with invalid mode"
-		"parameter %d\n",mode);
-	}
-	shouldFlush |= mmu_spte_update(sptep, spte);
-	return shouldFlush;
-}
-
-static bool rmap_protect(struct kvm_rmap_head *rmap_head, bool pt_protect, enum kvm_page_track_mode mode)
-{
-	u64 *sptep;
-	struct rmap_iterator iter;
-	bool flush = false;
-
-	for_each_rmap_spte(rmap_head, &iter, sptep) {
-		flush |= spte_protect(sptep, pt_protect, mode);
-	}
-
-	return flush;
+	return sevstep_rmap_protect(rmap_head, pt_protect, KVM_PAGE_TRACK_WRITE);
 }
 
 static bool spte_clear_dirty(u64 *sptep)
@@ -1290,7 +1246,7 @@ static void kvm_mmu_write_protect_pt_masked(struct kvm *kvm,
 	while (mask) {
 		rmap_head = gfn_to_rmap(slot->base_gfn + gfn_offset + __ffs(mask),
 					PG_LEVEL_4K, slot);
-		rmap_protect(rmap_head, false, KVM_PAGE_TRACK_WRITE);
+		rmap_write_protect(rmap_head, false);
 
 		/* clear the first set bit */
 		mask &= mask - 1;
@@ -1360,13 +1316,13 @@ void kvm_arch_mmu_enable_log_dirty_pt_masked(struct kvm *kvm,
 		if (READ_ONCE(eager_page_split))
 			kvm_mmu_try_split_huge_pages(kvm, slot, start, end, PG_LEVEL_4K);
 
-		kvm_mmu_slot_gfn_protect(kvm, slot, start, PG_LEVEL_2M, KVM_PAGE_TRACK_WRITE);
+		kvm_mmu_slot_gfn_write_protect(kvm, slot, start, PG_LEVEL_2M);
 
 		/* Cross two large pages? */
 		if (ALIGN(start << PAGE_SHIFT, PMD_SIZE) !=
 		    ALIGN(end << PAGE_SHIFT, PMD_SIZE))
-			kvm_mmu_slot_gfn_protect(kvm, slot, end,
-						       PG_LEVEL_2M, KVM_PAGE_TRACK_WRITE);
+			kvm_mmu_slot_gfn_write_protect(kvm, slot, end,
+						       PG_LEVEL_2M);
 	}
 
 	/* Now handle 4K PTEs.  */
@@ -1381,29 +1337,12 @@ int kvm_cpu_dirty_log_size(void)
 	return kvm_x86_ops.cpu_dirty_log_size;
 }
 
-bool kvm_mmu_slot_gfn_protect(struct kvm *kvm,
+bool kvm_mmu_slot_gfn_write_protect(struct kvm *kvm,
 				    struct kvm_memory_slot *slot, u64 gfn,
-				    int min_level, enum kvm_page_track_mode mode)
+				    int min_level)
 {
-	struct kvm_rmap_head *rmap_head;
-	int i;
-	//bool write_protected = false;
-	bool protected = false;
-
-	if (kvm_memslots_have_rmaps(kvm)) {
-		for (i = min_level; i <= KVM_MAX_HUGEPAGE_LEVEL; ++i) {
-			rmap_head = gfn_to_rmap(gfn, i, slot);
-			//write_protected |= rmap_write_protect(rmap_head, true);
-			protected |= rmap_protect(rmap_head, true, mode);
-		}
-	}
-
-	if (is_tdp_mmu_enabled(kvm))
-		//write_protected |=
-		protected |=
-			kvm_tdp_mmu_write_protect_gfn(kvm, slot, gfn, min_level);
-
-	return protected;
+	return sevstep_kvm_mmu_slot_gfn_protect(kvm, slot,
+		gfn, min_level, KVM_PAGE_TRACK_WRITE);
 }
 
 static bool kvm_vcpu_write_protect_gfn(struct kvm_vcpu *vcpu, u64 gfn)
@@ -1411,7 +1350,7 @@ static bool kvm_vcpu_write_protect_gfn(struct kvm_vcpu *vcpu, u64 gfn)
 	struct kvm_memory_slot *slot;
 
 	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
-	return kvm_mmu_slot_gfn_protect(vcpu->kvm, slot, gfn, PG_LEVEL_4K, KVM_PAGE_TRACK_WRITE);
+	return kvm_mmu_slot_gfn_write_protect(vcpu->kvm, slot, gfn, PG_LEVEL_4K);
 }
 
 static bool kvm_zap_rmapp(struct kvm *kvm, struct kvm_rmap_head *rmap_head,
@@ -3931,37 +3870,9 @@ static int handle_mmio_page_fault(struct kvm_vcpu *vcpu, u64 addr, bool direct)
 static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 					 struct kvm_page_fault *fault)
 {
-	int send_err;
-	uint64_t current_rip;
-	int have_rip;
-	int i;
-	bool was_tracked;
-	int modes[] = {KVM_PAGE_TRACK_WRITE,KVM_PAGE_TRACK_ACCESS,KVM_PAGE_TRACK_EXEC};
-	was_tracked = false;
-	for( i = 0; i < sizeof(modes) / sizeof(modes[0]); i++ ) {
-		if(kvm_slot_page_track_is_active(vcpu->kvm, fault->slot, fault->gfn,modes[i])) {
-			__untrack_single_page(vcpu, fault->gfn, modes[i]);
-			was_tracked = true;
-		}
-	}
-	if( was_tracked ) {
-		have_rip = false;
-		if( uspt_should_get_rip() ) {
-			//! because 0 indicates "no error" but have_rip should be one if successfull
-			have_rip = (!sev_step_get_rip_kvm_vcpu(vcpu,&current_rip));
-		}
-		if( uspt_batch_tracking_in_progress() ) {
-			if( (send_err = uspt_batch_tracking_save(fault->gfn << PAGE_SHIFT,fault->error_code,have_rip,current_rip)) ) {
-				printk_ratelimited("uspt_batch_tracking_save failed with %d\n##########################\n",send_err);
-			}
-			uspt_batch_tracking_handle_retrack(vcpu,fault->gfn);
-			uspt_batch_tracking_inc_event_idx();
-		} else {
-			if( (send_err = uspt_send_and_block(fault->gfn << PAGE_SHIFT,fault->error_code,have_rip,current_rip)) ) {
-				printk("uspt_send_and_block failed with %d\n##########################\n",send_err);
-			}
-		}
-	}
+	int active;
+
+	sevstep_uspt_page_fault_handle(vcpu, fault);
 
 	if (unlikely(fault->rsvd))
 		return false;
@@ -3973,8 +3884,11 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	 * guest is writing the page which is write tracked which can
 	 * not be fixed by page fault handler.
 	 */
-	if (kvm_slot_page_track_is_active(vcpu->kvm, fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE) || kvm_slot_page_track_is_active(vcpu->kvm, fault->slot, fault->gfn, KVM_PAGE_TRACK_ACCESS))
-		return true;
+	active = kvm_slot_page_track_is_active(vcpu->kvm,
+		fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE);
+	active |= kvm_slot_page_track_is_active(vcpu->kvm,
+		fault->slot, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+	if (active) return true;
 
 	return false;
 }
@@ -6053,7 +5967,7 @@ static bool slot_rmap_write_protect(struct kvm *kvm,
 				    struct kvm_rmap_head *rmap_head,
 				    const struct kvm_memory_slot *slot)
 {
-	return rmap_protect(rmap_head, false, KVM_PAGE_TRACK_WRITE);
+	return rmap_write_protect(rmap_head, false);
 }
 
 void kvm_mmu_slot_remove_write_access(struct kvm *kvm,
