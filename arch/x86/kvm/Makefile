@@ -3,8 +3,6 @@
 ccflags-y += -I $(srctree)/arch/x86/kvm -O2
 ccflags-$(CONFIG_KVM_WERROR) += -Werror
 
-KBUILD_EXTRA_SYMBOLS := ../../../drivers/crypto/ccp/Module.symvers
-
 ifeq ($(CONFIG_FRAME_POINTER),y)
 OBJECT_FILES_NON_STANDARD_vmenter.o := y
 endif
