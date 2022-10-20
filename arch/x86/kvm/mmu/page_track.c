@@ -19,7 +19,7 @@
 #include "mmu.h"
 #include "mmu_internal.h"
 
-#include "../sevstep/sevstep.h"
+#include "../cachepc/sevstep.h"
 
 bool kvm_page_track_write_tracking_enabled(struct kvm *kvm)
 {

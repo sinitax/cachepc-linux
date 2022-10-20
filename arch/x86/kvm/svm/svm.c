@@ -3795,22 +3795,27 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	guest_state_enter_irqoff();
 
 	if (sev_es_guest(vcpu->kvm)) {
-		memset(cachepc_msrmts, 0, 64 * 2);
+		memset(cachepc_msrmts, 0,
+			cachepc_msrmts_count * sizeof(uint16_t));
+
 		cpu = get_cpu();
 		local_irq_disable();
 		WARN_ON(cpu != 2);
+
 		__svm_sev_es_vcpu_run(vmcb_pa);
+
 		cachepc_save_msrmts(cachepc_ds);
 		local_irq_enable();
 		put_cpu();
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
 
-		memset(cachepc_msrmts, 0, 64 * 2);
+		memset(cachepc_msrmts, 0,
+			cachepc_msrmts_count * sizeof(uint16_t));
+
 		cpu = get_cpu();
 		local_irq_disable();
 		WARN_ON(cpu != 2);
-		/* TODO: try closer to vcpu_run */
 
 		/*
 		 * Use a single vmcb (vmcb01 because it's always valid) for

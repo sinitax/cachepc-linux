@@ -1152,7 +1152,7 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
 	}
 }
 
-#include "../sevstep/mmu.c"
+#include "../cachepc/mmu.c"
 
 /*
  * Write-protect on the specified @sptep, @pt_protect indicates whether

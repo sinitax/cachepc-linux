@@ -4,7 +4,7 @@
 
 #include<linux/srcu.h>
 
-#include "../../kvm/sevstep/uapi.h"
+#include "../../kvm/cachepc/uapi.h"
 
 /*
  * The notifier represented by @kvm_page_track_notifier_node is linked into
