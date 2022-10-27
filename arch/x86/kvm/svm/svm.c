@@ -3796,7 +3796,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	if (sev_es_guest(vcpu->kvm)) {
 		memset(cachepc_msrmts, 0,
-			cachepc_msrmts_count * sizeof(uint16_t));
+			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
+		cachepc_reset_pmc(CPC_L1MISS_PMC);
 
 		cpu = get_cpu();
 		local_irq_disable();
@@ -3805,13 +3806,16 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		__svm_sev_es_vcpu_run(vmcb_pa);
 
 		cachepc_save_msrmts(cachepc_ds);
+		if (cachepc_baseline_measure)
+			cachepc_update_baseline();
 		local_irq_enable();
 		put_cpu();
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
 
 		memset(cachepc_msrmts, 0,
-			cachepc_msrmts_count * sizeof(uint16_t));
+			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
+		cachepc_reset_pmc(CPC_L1MISS_PMC);
 
 		cpu = get_cpu();
 		local_irq_disable();
@@ -3830,6 +3834,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		vmload(__sme_page_pa(sd->save_area));
 
 		cachepc_save_msrmts(cachepc_ds);
+		if (cachepc_baseline_measure)
+			cachepc_update_baseline();
 		local_irq_enable();
 		put_cpu();
 	}
