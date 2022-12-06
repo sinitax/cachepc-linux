@@ -3,6 +3,8 @@
 #include <linux/kvm_host.h>
 
 #include "cachepc/cachepc.h"
+#include "cachepc/event.h"
+#include "cachepc/track.h"
 
 #include "irq.h"
 #include "mmu.h"
@@ -2083,9 +2085,150 @@ static int smi_interception(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+static void hexdump(uint8_t *prev, uint8_t *cur, size_t len)
+{
+      size_t i;
+
+      for (i = 0; i < len; i++) {
+              //printk(KERN_CONT "%02X ", cur[i]);
+              if (cur[i] != prev[i])
+                      printk(KERN_CONT "%02X ", cur[i]);
+              else
+                      printk(KERN_CONT "   ");
+              if ((i+1) % 16 == 0)
+                      printk(KERN_CONT "\n");
+      }
+      printk(KERN_CONT "\n");
+}
+
+static int snp_gpa_to_hva(struct kvm *kvm, gpa_t gpa, hva_t *hva)
+{
+        struct kvm_memory_slot *slot;
+        gfn_t gfn = gpa_to_gfn(gpa);
+        int idx;
+
+        idx = srcu_read_lock(&kvm->srcu);
+        slot = gfn_to_memslot(kvm, gfn);
+        if (!slot) {
+                srcu_read_unlock(&kvm->srcu, idx);
+                return -EINVAL;
+        }
+
+        /*
+         * Note, using the __gfn_to_hva_memslot() is not solely for performance,
+         * it's also necessary to avoid the "writable" check in __gfn_to_hva_many(),
+         * which will always fail on read-only memslots due to gfn_to_hva() assuming
+         * writes.
+         */
+        *hva = __gfn_to_hva_memslot(slot, gfn);
+        srcu_read_unlock(&kvm->srcu, idx);
+
+        return 0;
+}
+
 static int intr_interception(struct kvm_vcpu *vcpu)
 {
+	struct vmcb_control_area *control;
+	struct vcpu_svm *svm;
+	//static void *buf = NULL, *buf2 = NULL;
+	//uint8_t buf[1024];
+	//static uint8_t buf2[1024];
+	struct cpc_fault *fault, *next;
+	uint64_t rip;
+	size_t count;
+	hva_t addr;
+	int ret;
+
 	++vcpu->stat.irq_exits;
+
+	if (cachepc_track_mode == CPC_TRACK_DATA_ACCESS && cachepc_single_step) {
+		svm = to_svm(vcpu);
+		control = &svm->vmcb->control;
+
+		(void) svm;
+		(void) hexdump;
+		(void) rip;
+		(void) ret;
+		(void) addr;
+		(void) snp_gpa_to_hva;
+
+		rip = 0;
+
+		//CPC_INFO("VMSA PHYS 1 %llx\n", (uint64_t) __va(svm->sev_es.vmsa_pa));
+		//snp_gpa_to_hva(vcpu->kvm, svm->sev_es.snp_vmsa_gpa, &addr);
+		//CPC_INFO("VMSA PHYS 2 %llx\n", (uint64_t) addr);
+		//rip = *(uint64_t*)(addr + 0x178);
+
+		// ret = rmp_make_shared(svm->sev_es.vmsa_pa >> PAGE_SHIFT, PG_LEVEL_4K);
+		//rip = *(uint64_t*)((void *) svm->sev_es.vmsa + 0x178);
+
+		// CPC_INFO("ENC BIT %u\n", cpuid_ebx(0x8000001f) & 0x3f);
+		// CPC_INFO("VMSA %16lX\n", (uintptr_t) __va((uintptr_t) svm->sev_es.vmsa_pa | (1ull << 51)));
+		//rip = *(uint64_t*)__va(((uint64_t) svm->sev_es.vmsa_pa + 0x178));
+
+		//if (__copy_from_user(&rip, ((void*)svm->sev_es.vmsa) + 0x178, 8))
+		//	CPC_ERR("Failed to read from VMSA with __copy_from_user\n");
+		//if (kvm_read_guest(svm->vcpu.kvm,
+		//		((uintptr_t) svm->sev_es.snp_vmsa_gpa) + 0x178, &rip, 8))
+		//	CPC_ERR("Failed to read from VMSA with kvm_read_guest\n");
+		
+		rip = svm->sev_es.vmsa->rip;
+		CPC_INFO("%llu\n", rip);
+
+		// if (!buf) buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+		// if (!buf2) buf2 = kmalloc(PAGE_SIZE, GFP_KERNEL);
+
+		// if (kvm_read_guest(svm->vcpu.kvm, svm->sev_es.snp_vmsa_gpa,
+		// 		&rip, 8)) {
+		// 	CPC_ERR("Failed to read from guest\n");
+		// 	return 1;
+		// }
+
+		// if (memcmp(buf, buf2, PAGE_SIZE)) {
+		// 	pr_warn("HEXDUMP VMSA (%u)\n", cachepc_apic_timer);
+		// 	hexdump(buf2, buf, PAGE_SIZE);
+		// 	memcpy(buf2, buf, PAGE_SIZE);
+		// }	
+
+		// cachepc_rip = rip1;
+		// if (!cachepc_rip_prev)
+		// 	cachepc_rip_prev = cachepc_rip;
+		// if (cachepc_rip == cachepc_rip_prev) {
+		// 	cachepc_apic_timer += 1;
+		// 	return 1;
+		// }
+		// CPC_INFO("Detected RIP change! (%u)\n", cachepc_apic_timer);
+
+		if (!cachepc_retinst_prev)
+			cachepc_retinst_prev = cachepc_retinst;
+		if (cachepc_retinst_prev == cachepc_retinst) {
+			cachepc_apic_timer += 1;
+			return 1;
+		}
+		CPC_INFO("Detected RETINST change! (%llu,%u)\n",
+			cachepc_retinst, cachepc_apic_timer);
+
+		cachepc_single_step = false;
+
+		count = 0;
+		list_for_each_entry(fault, &cachepc_faults, list)
+			count += 1;
+
+		CPC_INFO("Caught single step with %lu faults!\n", count);
+		if (count == 0 || count > 2)
+			CPC_ERR("Unexpected step fault count: %lu faults!\n", count);
+
+		list_for_each_entry(fault, &cachepc_faults, list)
+			cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+
+		cachepc_send_track_event(&cachepc_faults);
+
+		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
+			list_del(&fault->list);
+			kfree(fault);
+		}
+	}
+
 	return 1;
 }
 
@@ -3271,8 +3414,24 @@ static int svm_handle_invalid_exit(struct kvm_vcpu *vcpu, u64 exit_code)
 
 int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 {
+	static const struct {
+		u64 code;
+		const char *name;
+	} codelut[] = {
+		SVM_EXIT_REASONS,
+		{ -1, NULL }
+	};
+	size_t i;
+
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
+
+	if (cachepc_debug && cachepc_track_mode != CPC_TRACK_NONE) {
+		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
+			if (codelut[i].code == exit_code)
+				pr_warn("KVM EXIT (%s)\n", codelut[i].name);
+		}
+	}
 
 #ifdef CONFIG_RETPOLINE
 	if (exit_code == SVM_EXIT_MSR)
@@ -3789,37 +3948,47 @@ static fastpath_t svm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
-	unsigned long vmcb_pa = svm->current_vmcb->pa;
+ 	unsigned long vmcb_pa = svm->current_vmcb->pa;
 	int cpu;
 
 	guest_state_enter_irqoff();
 
 	if (sev_es_guest(vcpu->kvm)) {
-		memset(cachepc_msrmts, 0,
-			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
-		cachepc_reset_pmc(CPC_L1MISS_PMC);
+		if (cachepc_single_step && cachepc_apic_timer == 0) {
+			cachepc_apic_timer = 100;
+			cachepc_retinst_prev = 0;
+			cachepc_rip_prev = 0;
+		}
 
 		cpu = get_cpu();
-		local_irq_disable();
 		WARN_ON(cpu != 2);
 
+		memset(cachepc_msrmts, 0,
+			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
+
+		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
 		__svm_sev_es_vcpu_run(vmcb_pa);
+		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
 
 		cachepc_save_msrmts(cachepc_ds);
 		if (cachepc_baseline_measure)
 			cachepc_update_baseline();
-		local_irq_enable();
+
 		put_cpu();
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
 
-		memset(cachepc_msrmts, 0,
-			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
-		cachepc_reset_pmc(CPC_L1MISS_PMC);
+		if (cachepc_single_step && cachepc_apic_timer == 0) {
+			cachepc_apic_timer = 50;
+			cachepc_retinst_prev = 0;
+			cachepc_rip_prev = 0;
+		}
 
 		cpu = get_cpu();
-		local_irq_disable();
 		WARN_ON(cpu != 2);
+
+		memset(cachepc_msrmts, 0,
+			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
 
 		/*
 		 * Use a single vmcb (vmcb01 because it's always valid) for
@@ -3831,12 +4000,14 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		__svm_vcpu_run(vmcb_pa, (unsigned long *)&vcpu->arch.regs);
 		vmsave(svm->vmcb01.pa);
 
+		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
 		vmload(__sme_page_pa(sd->save_area));
+		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
 
 		cachepc_save_msrmts(cachepc_ds);
 		if (cachepc_baseline_measure)
 			cachepc_update_baseline();
-		local_irq_enable();
+
 		put_cpu();
 	}
 

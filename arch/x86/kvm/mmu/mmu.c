@@ -1169,13 +1169,13 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
  */
 // static bool spte_write_protect(u64 *sptep, bool pt_protect)
 // {
-// 	return sevstep_spte_protect(sptep, pt_protect, KVM_PAGE_TRACK_WRITE);
+// 	return cachepc_spte_protect(sptep, pt_protect, KVM_PAGE_TRACK_WRITE);
 // }
 
 static bool rmap_write_protect(struct kvm_rmap_head *rmap_head,
 			       bool pt_protect)
 {
-	return sevstep_rmap_protect(rmap_head, pt_protect, KVM_PAGE_TRACK_WRITE);
+	return cachepc_rmap_protect(rmap_head, pt_protect, KVM_PAGE_TRACK_WRITE);
 }
 
 static bool spte_clear_dirty(u64 *sptep)
@@ -1341,7 +1341,7 @@ bool kvm_mmu_slot_gfn_write_protect(struct kvm *kvm,
 				    struct kvm_memory_slot *slot, u64 gfn,
 				    int min_level)
 {
-	return sevstep_kvm_mmu_slot_gfn_protect(kvm, slot,
+	return cachepc_kvm_mmu_slot_gfn_protect(kvm, slot,
 		gfn, min_level, KVM_PAGE_TRACK_WRITE);
 }
 
@@ -3872,13 +3872,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 {
 	int active;
 
-	sevstep_uspt_page_fault_handle(vcpu, fault);
-
-	if (unlikely(fault->rsvd))
-		return false;
-
-	if (!fault->present || !fault->write)
-		return false;
+	cachepc_page_fault_handle(vcpu, fault);
 
 	/*
 	 * guest is writing the page which is write tracked which can
@@ -3889,6 +3883,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	active |= kvm_slot_page_track_is_active(vcpu->kvm,
 		fault->slot, fault->gfn, KVM_PAGE_TRACK_ACCESS);
 	if (active) return true;
+
+	if (unlikely(fault->rsvd))
+		return false;
+
+	if (!fault->present || !fault->write)
+		return false;
 
 	return false;
 }

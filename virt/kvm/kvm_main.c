@@ -65,6 +65,7 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/kvm.h>
+#include "../../arch/x86/kvm/cachepc/track.h"
 
 #include <linux/kvm_dirty_ring.h>
 
@@ -72,8 +73,6 @@
 #define ITOA_MAX_LEN 12
 
 #include "../../arch/x86/kvm/cachepc/kvm.h"
-#include "../../arch/x86/kvm/cachepc/sevstep.h"
-#include "../../arch/x86/kvm/cachepc/uspt.h"
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
@@ -4522,7 +4521,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	void __user *argp = (void __user *)arg;
 	int r;
 
-	if (kvm->mm != current->mm || kvm->vm_dead)
+	if ((ioctl != KVM_MEMORY_ENCRYPT_OP && kvm->mm != current->mm) || kvm->vm_dead)
 		return -EIO;
 	switch (ioctl) {
 	case KVM_CREATE_VCPU:

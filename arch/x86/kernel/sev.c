@@ -1034,6 +1034,8 @@ static int wakeup_cpu_via_vmgexit(int apic_id, unsigned long start_ip)
 	if (!vmsa)
 		return -ENOMEM;
 
+	CPC_WARN("New VMSA allocated!\n");
+
 	/* CR4 should maintain the MCE value */
 	cr4 = native_read_cr4() & X86_CR4_MCE;
 

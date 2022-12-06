@@ -19,7 +19,8 @@
 #include "mmu.h"
 #include "mmu_internal.h"
 
-#include "../cachepc/sevstep.h"
+#include "../cachepc/cachepc.h"
+#include "../cachepc/track.h"
 
 bool kvm_page_track_write_tracking_enabled(struct kvm *kvm)
 {
@@ -117,13 +118,14 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 				  struct kvm_memory_slot *slot, gfn_t gfn,
 				  enum kvm_page_track_mode mode)
 {
-
 	if (WARN_ON(!page_track_mode_is_valid(mode)))
 		return;
 
 	if (WARN_ON(mode == KVM_PAGE_TRACK_WRITE &&
 		    !kvm_page_track_write_tracking_enabled(kvm)))
 		return;
+
+	CPC_DBG("Tracking page: %llu %i\n", gfn, mode);
 
 	update_gfn_track(slot, gfn, mode, 1);
 
@@ -133,7 +135,7 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 	 */
 	kvm_mmu_gfn_disallow_lpage(slot, gfn);
 
-	if (sevstep_kvm_mmu_slot_gfn_protect(kvm,
+	if (cachepc_kvm_mmu_slot_gfn_protect(kvm,
 			slot, gfn, PG_LEVEL_4K, mode)) {
 		kvm_flush_remote_tlbs(kvm);
 	}
@@ -163,6 +165,8 @@ void kvm_slot_page_track_remove_page(struct kvm *kvm,
 	if (WARN_ON(mode == KVM_PAGE_TRACK_WRITE &&
 		    !kvm_page_track_write_tracking_enabled(kvm)))
 		return;
+
+	CPC_DBG("Untracking page: %llu %i\n", gfn, mode);
 
 	update_gfn_track(slot, gfn, mode, -1);
 

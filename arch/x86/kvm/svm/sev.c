@@ -35,6 +35,8 @@
 #include "trace.h"
 #include "mmu.h"
 
+#include "cachepc/cachepc.h"
+
 #ifndef CONFIG_KVM_AMD_SEV
 /*
  * When this config is not defined, SEV feature is not supported and APIs in
@@ -888,7 +890,7 @@ static int __sev_issue_dbg_cmd(struct kvm *kvm, unsigned long src,
 			     &data, error);
 }
 
-static int __sev_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
+int __sev_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
 			     unsigned long dst_paddr, int sz, int *err)
 {
 	int offset;
@@ -904,12 +906,20 @@ static int __sev_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
 	return __sev_issue_dbg_cmd(kvm, src_paddr, dst_paddr, sz, err, false);
 }
 
+
+int sev_dbg_decrypt_ext(struct kvm *kvm, unsigned long src_paddr,
+			     unsigned long dst_paddr, int sz, int *err) {
+	return __sev_dbg_decrypt(kvm, src_paddr, dst_paddr, sz, err);
+}
+EXPORT_SYMBOL(sev_dbg_decrypt_ext);
+
 static int __sev_dbg_decrypt_user(struct kvm *kvm, unsigned long paddr,
 				  void __user *dst_uaddr,
 				  unsigned long dst_paddr,
 				  int size, int *err)
 {
 	struct page *tpage = NULL;
+	struct vcpu_svm *svm;
 	int ret, offset;
 
 	/* if inputs are not 16-byte then use intermediate buffer */
@@ -921,6 +931,11 @@ static int __sev_dbg_decrypt_user(struct kvm *kvm, unsigned long paddr,
 			return -ENOMEM;
 
 		dst_paddr = __sme_page_pa(tpage);
+	}
+
+	if (dst_uaddr == CPC_VMSA_MAGIC_ADDR) {
+		svm = to_svm(xa_load(&kvm->vcpu_array, 0));
+		paddr = __pa(svm->sev_es.vmsa);
 	}
 
 	ret = __sev_dbg_decrypt(kvm, paddr, dst_paddr, size, err);
@@ -1024,6 +1039,7 @@ static int sev_dbg_crypt(struct kvm *kvm, struct kvm_sev_cmd *argp, bool dec)
 	struct kvm_sev_dbg debug;
 	unsigned long n;
 	unsigned int size;
+	bool vmsa_dec;
 	int ret;
 
 	if (!sev_guest(kvm))
@@ -1036,6 +1052,13 @@ static int sev_dbg_crypt(struct kvm *kvm, struct kvm_sev_cmd *argp, bool dec)
 		return -EINVAL;
 	if (!debug.dst_uaddr)
 		return -EINVAL;
+
+	vmsa_dec = false;
+	if (debug.src_uaddr == (uintptr_t) CPC_VMSA_MAGIC_ADDR) {
+		debug.len = PAGE_SIZE;
+		debug.src_uaddr = debug.dst_uaddr;
+		vmsa_dec = true;
+	}
 
 	vaddr = debug.src_uaddr;
 	size = debug.len;
@@ -1075,7 +1098,8 @@ static int sev_dbg_crypt(struct kvm *kvm, struct kvm_sev_cmd *argp, bool dec)
 		if (dec)
 			ret = __sev_dbg_decrypt_user(kvm,
 						     __sme_page_pa(src_p[0]) + s_off,
-						     (void __user *)dst_vaddr,
+						     vmsa_dec ? CPC_VMSA_MAGIC_ADDR
+						     	: (void __user *)dst_vaddr,
 						     __sme_page_pa(dst_p[0]) + d_off,
 						     len, &argp->error);
 		else
@@ -2183,6 +2207,8 @@ static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 		struct vcpu_svm *svm = to_svm(xa_load(&kvm->vcpu_array, i));
 		u64 pfn = __pa(svm->sev_es.vmsa) >> PAGE_SHIFT;
 
+		// CPC_WARN("RIP READ PRE-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
+
 		/* Perform some pre-encryption checks against the VMSA */
 		ret = sev_es_sync_vmsa(svm);
 		if (ret)
@@ -2192,6 +2218,8 @@ static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 		ret = rmp_make_private(pfn, -1, PG_LEVEL_4K, sev->asid, true);
 		if (ret)
 			return ret;
+
+		// CPC_WARN("RIP READ POST-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
 
 		/* Issue the SNP command to encrypt the VMSA */
 		data.address = __sme_pa(svm->sev_es.vmsa);
@@ -3149,9 +3177,9 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 		}
 		break;
 	case SVM_EXIT_VMMCALL:
-		if (!ghcb_rax_is_valid(ghcb) ||
-		    !ghcb_cpl_is_valid(ghcb))
-			goto vmgexit_err;
+		// if (!ghcb_rax_is_valid(ghcb) ||
+		//     !ghcb_cpl_is_valid(ghcb))
+		// 	goto vmgexit_err;
 		break;
 	case SVM_EXIT_RDTSCP:
 		break;
@@ -3920,6 +3948,7 @@ static int sev_snp_ap_creation(struct vcpu_svm *svm)
 			goto out;
 		}
 
+		CPC_WARN("VMSA_GPA SET via VMGEXIT_AP_CREATE\n");
 		target_svm->sev_es.snp_vmsa_gpa = svm->vmcb->control.exit_info_2;
 		break;
 	case SVM_VMGEXIT_AP_DESTROY:

@@ -82,7 +82,9 @@
 #include <asm/sgx.h>
 #include <clocksource/hyperv_timer.h>
 
-#include "cachepc/sevstep.h"
+#include "cachepc/cachepc.h"
+#include "cachepc/event.h"
+#include "cachepc/track.h"
 
 #define CREATE_TRACE_POINTS
 #include "trace.h"
@@ -9269,10 +9271,10 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		a3 &= 0xFFFFFFFF;
 	}
 
-	if (static_call(kvm_x86_get_cpl)(vcpu) != 0) {
-		ret = -KVM_EPERM;
-		goto out;
-	}
+	// if (static_call(kvm_x86_get_cpl)(vcpu) != 0) {
+	// 	ret = -KVM_EPERM;
+	// 	goto out;
+	// }
 
 	ret = -KVM_ENOSYS;
 
@@ -9328,11 +9330,16 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		vcpu->arch.complete_userspace_io = complete_hypercall_exit;
 		return 0;
 	}
+	case KVM_HC_CPC_VMMCALL:
+		CPC_WARN("Cachepc: Hypecrcall Run\n");
+		cachepc_send_guest_event(a0, a1);
+		ret = 0;
+		break;
 	default:
 		ret = -KVM_ENOSYS;
 		break;
 	}
-out:
+//out:
 	if (!op_64_bit)
 		ret = (u32)ret;
 	kvm_rax_write(vcpu, ret);
