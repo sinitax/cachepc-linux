@@ -2591,11 +2591,11 @@ static int rmpupdate(u64 pfn, struct rmpupdate *val)
 	 * direct map.
 	 */
 	if (val->assigned) {
-		if (invalid_direct_map(pfn, npages)) {
-			pr_err("Failed to unmap pfn 0x%llx pages %d from direct_map\n",
-			       pfn, npages);
-			return -EFAULT;
-		}
+		// if (invalid_direct_map(pfn, npages)) {
+		// 	pr_err("Failed to unmap pfn 0x%llx pages %d from direct_map\n",
+		// 	       pfn, npages);
+		// 	return -EFAULT;
+		// }
 	}
 
 retry:

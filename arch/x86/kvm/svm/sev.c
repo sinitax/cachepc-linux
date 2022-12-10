@@ -35,6 +35,7 @@
 #include "trace.h"
 #include "mmu.h"
 
+#include "asm/set_memory.h"
 #include "cachepc/cachepc.h"
 
 #ifndef CONFIG_KVM_AMD_SEV
@@ -2194,6 +2195,62 @@ e_unpin:
 	return ret;
 }
 
+static int rmpupdate_noremap(u64 pfn, struct rmpupdate *val)
+{
+	unsigned long paddr = pfn << PAGE_SHIFT;
+	int ret, level, npages;
+	int retries = 0;
+
+	if (!pfn_valid(pfn))
+		return -EINVAL;
+
+	if (!cpu_feature_enabled(X86_FEATURE_SEV_SNP))
+		return -ENXIO;
+
+	level = RMP_TO_X86_PG_LEVEL(val->pagesize);
+	npages = page_level_size(level) / PAGE_SIZE;
+
+
+retry:
+	/* Binutils version 2.36 supports the RMPUPDATE mnemonic. */
+	asm volatile(".byte 0xF2, 0x0F, 0x01, 0xFE"
+		     : "=a"(ret)
+		     : "a"(paddr), "c"((unsigned long)val)
+		     : "memory", "cc");
+
+	if (ret) {
+		if (!retries) {
+			pr_err("rmpupdate failed, ret: %d, pfn: %llx, npages: %d, level: %d, retrying (max: %d)...\n",
+			       ret, pfn, npages, level, 2 * num_present_cpus());
+			dump_stack();
+		}
+		retries++;
+		if (retries < 2 * num_present_cpus())
+			goto retry;
+	} else if (retries > 0) {
+		pr_err("rmpupdate for pfn %llx succeeded after %d retries\n", pfn, retries);
+	}
+
+        return ret;
+}
+
+int rmp_make_private_noremap(u64 pfn, u64 gpa, enum pg_level level, int asid, bool immutable)
+{
+        struct rmpupdate val;
+
+        if (!pfn_valid(pfn))
+                return -EINVAL;
+
+        memset(&val, 0, sizeof(val));
+        val.assigned = 1;
+        val.asid = asid;
+        val.immutable = immutable;
+        val.gpa = gpa;
+        val.pagesize = X86_TO_RMP_PG_LEVEL(level);
+
+        return rmpupdate_noremap(pfn, &val);
+}
+
 static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 {
 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
@@ -2207,7 +2264,7 @@ static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 		struct vcpu_svm *svm = to_svm(xa_load(&kvm->vcpu_array, i));
 		u64 pfn = __pa(svm->sev_es.vmsa) >> PAGE_SHIFT;
 
-		// CPC_WARN("RIP READ PRE-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
+		CPC_WARN("RIP READ PRE-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
 
 		/* Perform some pre-encryption checks against the VMSA */
 		ret = sev_es_sync_vmsa(svm);
@@ -2215,11 +2272,11 @@ static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 			return ret;
 
 		/* Transition the VMSA page to a firmware state. */
-		ret = rmp_make_private(pfn, -1, PG_LEVEL_4K, sev->asid, true);
+		ret = rmp_make_private_noremap(pfn, -1, PG_LEVEL_4K, sev->asid, true);
 		if (ret)
 			return ret;
 
-		// CPC_WARN("RIP READ POST-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
+		CPC_WARN("RIP READ POST-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
 
 		/* Issue the SNP command to encrypt the VMSA */
 		data.address = __sme_pa(svm->sev_es.vmsa);

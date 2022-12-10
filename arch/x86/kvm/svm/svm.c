@@ -2085,59 +2085,28 @@ static int smi_interception(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-static void hexdump(uint8_t *prev, uint8_t *cur, size_t len)
-{
-      size_t i;
-
-      for (i = 0; i < len; i++) {
-              //printk(KERN_CONT "%02X ", cur[i]);
-              if (cur[i] != prev[i])
-                      printk(KERN_CONT "%02X ", cur[i]);
-              else
-                      printk(KERN_CONT "   ");
-              if ((i+1) % 16 == 0)
-                      printk(KERN_CONT "\n");
-      }
-      printk(KERN_CONT "\n");
-}
-
-static int snp_gpa_to_hva(struct kvm *kvm, gpa_t gpa, hva_t *hva)
-{
-        struct kvm_memory_slot *slot;
-        gfn_t gfn = gpa_to_gfn(gpa);
-        int idx;
-
-        idx = srcu_read_lock(&kvm->srcu);
-        slot = gfn_to_memslot(kvm, gfn);
-        if (!slot) {
-                srcu_read_unlock(&kvm->srcu, idx);
-                return -EINVAL;
-        }
-
-        /*
-         * Note, using the __gfn_to_hva_memslot() is not solely for performance,
-         * it's also necessary to avoid the "writable" check in __gfn_to_hva_many(),
-         * which will always fail on read-only memslots due to gfn_to_hva() assuming
-         * writes.
-         */
-        *hva = __gfn_to_hva_memslot(slot, gfn);
-        srcu_read_unlock(&kvm->srcu, idx);
-
-        return 0;
-}
+// static void hexdump(uint8_t *prev, uint8_t *cur, size_t len)
+// {
+//       size_t i;
+// 
+//       for (i = 0; i < len; i++) {
+//               //printk(KERN_CONT "%02X ", cur[i]);
+//               if (cur[i] != prev[i])
+//                       printk(KERN_CONT "%02X ", cur[i]);
+//               else
+//                       printk(KERN_CONT "   ");
+//               if ((i+1) % 16 == 0)
+//                       printk(KERN_CONT "\n");
+//       }
+//       printk(KERN_CONT "\n");
+// }
 
 static int intr_interception(struct kvm_vcpu *vcpu)
 {
 	struct vmcb_control_area *control;
 	struct vcpu_svm *svm;
-	//static void *buf = NULL, *buf2 = NULL;
-	//uint8_t buf[1024];
-	//static uint8_t buf2[1024];
 	struct cpc_fault *fault, *next;
-	uint64_t rip;
 	size_t count;
-	hva_t addr;
-	int ret;
 
 	++vcpu->stat.irq_exits;
 
@@ -2145,68 +2114,23 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		svm = to_svm(vcpu);
 		control = &svm->vmcb->control;
 
-		(void) svm;
-		(void) hexdump;
-		(void) rip;
-		(void) ret;
-		(void) addr;
-		(void) snp_gpa_to_hva;
-
-		rip = 0;
-
-		//CPC_INFO("VMSA PHYS 1 %llx\n", (uint64_t) __va(svm->sev_es.vmsa_pa));
-		//snp_gpa_to_hva(vcpu->kvm, svm->sev_es.snp_vmsa_gpa, &addr);
-		//CPC_INFO("VMSA PHYS 2 %llx\n", (uint64_t) addr);
-		//rip = *(uint64_t*)(addr + 0x178);
-
-		// ret = rmp_make_shared(svm->sev_es.vmsa_pa >> PAGE_SHIFT, PG_LEVEL_4K);
-		//rip = *(uint64_t*)((void *) svm->sev_es.vmsa + 0x178);
-
-		// CPC_INFO("ENC BIT %u\n", cpuid_ebx(0x8000001f) & 0x3f);
-		// CPC_INFO("VMSA %16lX\n", (uintptr_t) __va((uintptr_t) svm->sev_es.vmsa_pa | (1ull << 51)));
-		//rip = *(uint64_t*)__va(((uint64_t) svm->sev_es.vmsa_pa + 0x178));
-
-		//if (__copy_from_user(&rip, ((void*)svm->sev_es.vmsa) + 0x178, 8))
-		//	CPC_ERR("Failed to read from VMSA with __copy_from_user\n");
-		//if (kvm_read_guest(svm->vcpu.kvm,
-		//		((uintptr_t) svm->sev_es.snp_vmsa_gpa) + 0x178, &rip, 8))
-		//	CPC_ERR("Failed to read from VMSA with kvm_read_guest\n");
-		
-		rip = svm->sev_es.vmsa->rip;
-		CPC_INFO("%llu\n", rip);
-
-		// if (!buf) buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
-		// if (!buf2) buf2 = kmalloc(PAGE_SIZE, GFP_KERNEL);
-
-		// if (kvm_read_guest(svm->vcpu.kvm, svm->sev_es.snp_vmsa_gpa,
-		// 		&rip, 8)) {
-		// 	CPC_ERR("Failed to read from guest\n");
-		// 	return 1;
-		// }
-
-		// if (memcmp(buf, buf2, PAGE_SIZE)) {
-		// 	pr_warn("HEXDUMP VMSA (%u)\n", cachepc_apic_timer);
-		// 	hexdump(buf2, buf, PAGE_SIZE);
-		// 	memcpy(buf2, buf, PAGE_SIZE);
-		// }	
-
-		// cachepc_rip = rip1;
-		// if (!cachepc_rip_prev)
-		// 	cachepc_rip_prev = cachepc_rip;
-		// if (cachepc_rip == cachepc_rip_prev) {
-		// 	cachepc_apic_timer += 1;
-		// 	return 1;
-		// }
-		// CPC_INFO("Detected RIP change! (%u)\n", cachepc_apic_timer);
-
-		if (!cachepc_retinst_prev)
-			cachepc_retinst_prev = cachepc_retinst;
-		if (cachepc_retinst_prev == cachepc_retinst) {
+		cachepc_rip = svm->sev_es.vmsa->rip;
+		if (!cachepc_rip_prev)
+			cachepc_rip_prev = cachepc_rip;
+		if (cachepc_rip == cachepc_rip_prev) {
 			cachepc_apic_timer += 1;
 			return 1;
 		}
-		CPC_INFO("Detected RETINST change! (%llu,%u)\n",
-			cachepc_retinst, cachepc_apic_timer);
+		CPC_INFO("Detected RIP change! (%u)\n", cachepc_apic_timer);
+
+		// if (!cachepc_retinst_prev)
+		// 	cachepc_retinst_prev = cachepc_retinst;
+		// if (cachepc_retinst_prev == cachepc_retinst) {
+		// 	cachepc_apic_timer += 1;
+		// 	return 1;
+		// }
+		// CPC_INFO("Detected RETINST change! (%llu,%u)\n",
+		// 	cachepc_retinst, cachepc_apic_timer);
 
 		cachepc_single_step = false;
 
@@ -3955,7 +3879,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	if (sev_es_guest(vcpu->kvm)) {
 		if (cachepc_single_step && cachepc_apic_timer == 0) {
-			cachepc_apic_timer = 100;
+			cachepc_apic_timer = 200;
 			cachepc_retinst_prev = 0;
 			cachepc_rip_prev = 0;
 		}
