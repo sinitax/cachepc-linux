@@ -87,7 +87,7 @@ static void *sev_init_ex_buffer;
 static size_t sev_es_tmr_size = SEV_ES_TMR_SIZE;
 
 static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret);
-int sev_do_cmd(int cmd, void *data, int *psp_ret);
+static int sev_do_cmd(int cmd, void *data, int *psp_ret);
 
 static inline bool sev_version_greater_or_equal(u8 maj, u8 min)
 {
@@ -865,7 +865,7 @@ static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret)
 	return ret;
 }
 
-int sev_do_cmd(int cmd, void *data, int *psp_ret)
+static int sev_do_cmd(int cmd, void *data, int *psp_ret)
 {
 	int rc;
 
@@ -875,7 +875,6 @@ int sev_do_cmd(int cmd, void *data, int *psp_ret)
 
 	return rc;
 }
-EXPORT_SYMBOL(sev_do_cmd);
 
 static int __sev_init_locked(int *error)
 {

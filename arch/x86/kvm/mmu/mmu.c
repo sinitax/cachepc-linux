@@ -1154,24 +1154,6 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
 
 #include "../cachepc/mmu.c"
 
-/*
- * Write-protect on the specified @sptep, @pt_protect indicates whether
- * spte write-protection is caused by protecting shadow page table.
- *
- * Note: write protection is difference between dirty logging and spte
- * protection:
- * - for dirty logging, the spte can be set to writable at anytime if
- *   its dirty bitmap is properly set.
- * - for spte protection, the spte can be writable only after unsync-ing
- *   shadow page.
- *
- * Return true if tlb need be flushed.
- */
-// static bool spte_write_protect(u64 *sptep, bool pt_protect)
-// {
-// 	return cachepc_spte_protect(sptep, pt_protect, KVM_PAGE_TRACK_WRITE);
-// }
-
 static bool rmap_write_protect(struct kvm_rmap_head *rmap_head,
 			       bool pt_protect)
 {

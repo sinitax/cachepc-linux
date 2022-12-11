@@ -9331,7 +9331,7 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		return 0;
 	}
 	case KVM_HC_CPC_VMMCALL:
-		CPC_WARN("Cachepc: Hypecrcall Run\n");
+		CPC_WARN("Intercepted VMMCALL %lu:%lu\n", a0, a1);
 		cachepc_send_guest_event(a0, a1);
 		ret = 0;
 		break;

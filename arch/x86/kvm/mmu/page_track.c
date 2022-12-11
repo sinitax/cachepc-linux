@@ -125,8 +125,6 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 		    !kvm_page_track_write_tracking_enabled(kvm)))
 		return;
 
-	CPC_DBG("Tracking page: %llu %i\n", gfn, mode);
-
 	update_gfn_track(slot, gfn, mode, 1);
 
 	/*
@@ -165,8 +163,6 @@ void kvm_slot_page_track_remove_page(struct kvm *kvm,
 	if (WARN_ON(mode == KVM_PAGE_TRACK_WRITE &&
 		    !kvm_page_track_write_tracking_enabled(kvm)))
 		return;
-
-	CPC_DBG("Untracking page: %llu %i\n", gfn, mode);
 
 	update_gfn_track(slot, gfn, mode, -1);
 

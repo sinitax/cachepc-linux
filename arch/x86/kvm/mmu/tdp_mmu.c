@@ -1827,8 +1827,10 @@ static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 			continue;
 
 		new_spte = iter.old_spte & ~shadow_mmu_writable_mask;
-		new_spte &= ~PT_WRITABLE_MASK;
-		if (mode == KVM_PAGE_TRACK_ACCESS) {
+		if (mode == KVM_PAGE_TRACK_WRITE) {
+			new_spte &= ~PT_WRITABLE_MASK;
+		} else if (mode == KVM_PAGE_TRACK_ACCESS) {
+			new_spte &= ~PT_WRITABLE_MASK;
 			new_spte &= ~PT_PRESENT_MASK;
 			new_spte &= ~PT_USER_MASK;
 			new_spte |= (0x1ULL << PT64_NX_SHIFT);
@@ -1854,8 +1856,6 @@ bool cachepc_tdp_protect_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 	struct kvm_mmu_page *root;
 	bool spte_set = false;
 
-	// pr_warn("Sevstep: tdp_protect_gfn\n");
-
 	lockdep_assert_held_write(&kvm->mmu_lock);
 	for_each_tdp_mmu_root(kvm, root, slot->as_id)
 		spte_set |= cachepc_protect_gfn(kvm, root, gfn, min_level, mode);
@@ -1869,57 +1869,12 @@ EXPORT_SYMBOL(cachepc_tdp_protect_gfn);
  * MMU-writable bit to ensure future writes continue to be intercepted.
  * Returns true if an SPTE was set and a TLB flush is needed.
  */
-// static bool write_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
-// 			      gfn_t gfn, int min_level)
-// {
-// 	struct tdp_iter iter;
-// 	u64 new_spte;
-// 	bool spte_set = false;
-// 
-// 	BUG_ON(min_level > KVM_MAX_HUGEPAGE_LEVEL);
-// 
-// 	rcu_read_lock();
-// 
-// 	for_each_tdp_pte_min_level(iter, root, min_level, gfn, gfn + 1) {
-// 		if (!is_shadow_present_pte(iter.old_spte) ||
-// 		    !is_last_spte(iter.old_spte, iter.level))
-// 			continue;
-// 
-// 		new_spte = iter.old_spte & ~shadow_mmu_writable_mask;
-// 		new_spte &= ~PT_WRITABLE_MASK;
-// 
-// 		if (new_spte == iter.old_spte)
-// 			break;
-// 
-// 		tdp_mmu_set_spte(kvm, &iter, new_spte);
-// 		spte_set = true;
-// 	}
-// 
-// 	rcu_read_unlock();
-// 
-// 	return spte_set;
-// }
-
-/*
- * Removes write access on the last level SPTE mapping this GFN and unsets the
- * MMU-writable bit to ensure future writes continue to be intercepted.
- * Returns true if an SPTE was set and a TLB flush is needed.
- */
 bool kvm_tdp_mmu_write_protect_gfn(struct kvm *kvm,
 				   struct kvm_memory_slot *slot, gfn_t gfn,
 				   int min_level)
 {
 	return cachepc_tdp_protect_gfn(kvm, slot, gfn, min_level,
 		KVM_PAGE_TRACK_WRITE);
-
-	// struct kvm_mmu_page *root;
-	// bool spte_set = false;
-
-	// lockdep_assert_held_write(&kvm->mmu_lock);
-	// for_each_tdp_mmu_root(kvm, root, slot->as_id)
-	// 	spte_set |= write_protect_gfn(kvm, root, gfn, min_level);
-
-	// return spte_set;
 }
 
 /*

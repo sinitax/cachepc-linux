@@ -1034,8 +1034,6 @@ static int wakeup_cpu_via_vmgexit(int apic_id, unsigned long start_ip)
 	if (!vmsa)
 		return -ENOMEM;
 
-	CPC_WARN("New VMSA allocated!\n");
-
 	/* CR4 should maintain the MCE value */
 	cr4 = native_read_cr4() & X86_CR4_MCE;
 
@@ -2591,11 +2589,11 @@ static int rmpupdate(u64 pfn, struct rmpupdate *val)
 	 * direct map.
 	 */
 	if (val->assigned) {
-		// if (invalid_direct_map(pfn, npages)) {
-		// 	pr_err("Failed to unmap pfn 0x%llx pages %d from direct_map\n",
-		// 	       pfn, npages);
-		// 	return -EFAULT;
-		// }
+		if (invalid_direct_map(pfn, npages)) {
+			pr_err("Failed to unmap pfn 0x%llx pages %d from direct_map\n",
+			       pfn, npages);
+			return -EFAULT;
+		}
 	}
 
 retry:

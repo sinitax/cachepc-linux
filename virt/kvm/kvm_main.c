@@ -1367,7 +1367,7 @@ static void kvm_insert_gfn_node(struct kvm_memslots *slots,
 	int idx = slots->node_idx;
 
 	parent = NULL;
-	for (node = &gfn_tree->rb_node; *node;) {
+	for (node = &gfn_tree->rb_node; *node; ) {
 		struct kvm_memory_slot *tmp;
 
 		tmp = container_of(*node, struct kvm_memory_slot, gfn_node[idx]);

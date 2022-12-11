@@ -275,7 +275,7 @@
  *
  * 512GB Pages are not supported due to a hardware bug
  */
-#define AMD_IOMMU_PGSIZES	(PAGE_SIZE)
+#define AMD_IOMMU_PGSIZES	((~0xFFFUL) & ~(2ULL << 38))
 
 /* Bit value definition for dte irq remapping fields*/
 #define DTE_IRQ_PHYS_ADDR_MASK	(((1ULL << 45)-1) << 6)
