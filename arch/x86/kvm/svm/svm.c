@@ -2110,7 +2110,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	++vcpu->stat.irq_exits;
 
-	if (cachepc_track_mode == CPC_TRACK_DATA_ACCESS && cachepc_single_step) {
+	if (cachepc_single_step) {
 		svm = to_svm(vcpu);
 		control = &svm->vmcb->control;
 
@@ -2132,20 +2132,57 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		// CPC_INFO("Detected RETINST change! (%llu,%u)\n",
 		// 	cachepc_retinst, cachepc_apic_timer);
 
-		cachepc_single_step = false;
-
 		count = 0;
 		list_for_each_entry(fault, &cachepc_faults, list)
 			count += 1;
-
 		CPC_INFO("Caught single step with %lu faults!\n", count);
-		if (count == 0 || count > 2)
-			CPC_ERR("Unexpected step fault count: %lu faults!\n", count);
 
-		list_for_each_entry(fault, &cachepc_faults, list)
-			cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+		if (cachepc_track_mode == CPC_TRACK_EXEC) {
+			if (count > 1) {
+				/* we assume multiple new fetches are because of branch prediction..
+				 * need to do one more step to resolve, so retrack all */
+				list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
+					cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+					list_del(&fault->list);
+					kfree(fault);
+				}
 
-		cachepc_send_track_event(&cachepc_faults);
+				CPC_INFO("Single stepping to resolve multiple fetch gfns\n");
+
+				cachepc_single_step = true;
+				cachepc_apic_timer = 0;
+				return 1;
+			} else if (count == 1) {
+				if (cachepc_inst_fault_err) {
+					/* retrack previous faulted page, current stays untracked */
+					cachepc_track_single(vcpu, cachepc_inst_fault_gfn,
+						KVM_PAGE_TRACK_ACCESS);
+				}
+
+				CPC_INFO("Swapping active inst fault gfn %llu -> %llu!\n", cachepc_inst_fault_gfn, fault->gfn);
+				fault = list_first_entry(&cachepc_faults, struct cpc_fault, list);
+				cachepc_inst_fault_gfn = fault->gfn;
+				cachepc_inst_fault_err = fault->err;
+			}
+
+			/* TODO: retrack cachepc_inst_fault_gfn when switching mode */
+
+			if (cachepc_inst_fault_gfn >= cachepc_track_start_gfn
+					&& cachepc_inst_fault_gfn < cachepc_track_end_gfn) {
+				CPC_INFO("EXEC TRACK in range!\n");
+				cachepc_send_track_event_single(cachepc_inst_fault_gfn,
+					cachepc_inst_fault_err, 0);
+				cachepc_single_step = true;
+				cachepc_apic_timer = 0;
+			} else {
+				cachepc_single_step = false;
+			}
+		} else {
+			list_for_each_entry(fault, &cachepc_faults, list)
+				cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+
+			cachepc_send_track_event(&cachepc_faults);
+		}
 
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
 			list_del(&fault->list);
@@ -3927,6 +3964,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
 		vmload(__sme_page_pa(sd->save_area));
 		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
+
+		cachepc_inst_fault_retinst += cachepc_retinst;
 
 		cachepc_save_msrmts(cachepc_ds);
 		if (cachepc_baseline_measure)

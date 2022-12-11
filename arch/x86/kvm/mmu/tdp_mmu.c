@@ -1832,6 +1832,8 @@ static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 			new_spte &= ~PT_PRESENT_MASK;
 			new_spte &= ~PT_USER_MASK;
 			new_spte |= (0x1ULL << PT64_NX_SHIFT);
+		} else if (mode == KVM_PAGE_TRACK_EXEC) {
+			new_spte |= (0x1ULL << PT64_NX_SHIFT);
 		}
 
 		if (new_spte == iter.old_spte)

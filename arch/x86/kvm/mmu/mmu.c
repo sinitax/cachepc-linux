@@ -3881,6 +3881,8 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	active = kvm_slot_page_track_is_active(vcpu->kvm,
 		fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE);
 	active |= kvm_slot_page_track_is_active(vcpu->kvm,
+		fault->slot, fault->gfn, KVM_PAGE_TRACK_EXEC);
+	active |= kvm_slot_page_track_is_active(vcpu->kvm,
 		fault->slot, fault->gfn, KVM_PAGE_TRACK_ACCESS);
 	if (active) return true;
 
