@@ -2264,8 +2264,6 @@ static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 		struct vcpu_svm *svm = to_svm(xa_load(&kvm->vcpu_array, i));
 		u64 pfn = __pa(svm->sev_es.vmsa) >> PAGE_SHIFT;
 
-		CPC_WARN("RIP READ PRE-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
-
 		/* Perform some pre-encryption checks against the VMSA */
 		ret = sev_es_sync_vmsa(svm);
 		if (ret)
@@ -2275,8 +2273,6 @@ static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 		ret = rmp_make_private_noremap(pfn, -1, PG_LEVEL_4K, sev->asid, true);
 		if (ret)
 			return ret;
-
-		CPC_WARN("RIP READ POST-PRIVATE: %llu\n", svm->sev_es.vmsa->rip);
 
 		/* Issue the SNP command to encrypt the VMSA */
 		data.address = __sme_pa(svm->sev_es.vmsa);
@@ -4005,7 +4001,6 @@ static int sev_snp_ap_creation(struct vcpu_svm *svm)
 			goto out;
 		}
 
-		CPC_WARN("VMSA_GPA SET via VMGEXIT_AP_CREATE\n");
 		target_svm->sev_es.snp_vmsa_gpa = svm->vmcb->control.exit_info_2;
 		break;
 	case SVM_VMGEXIT_AP_DESTROY:
