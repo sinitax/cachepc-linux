@@ -402,7 +402,7 @@ static int __sev_issue_cmd(int fd, int id, void *data, int *error)
 	return ret;
 }
 
-static int sev_issue_cmd(struct kvm *kvm, int id, void *data, int *error)
+int sev_issue_cmd(struct kvm *kvm, int id, void *data, int *error)
 {
 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
 
@@ -1122,6 +1122,71 @@ static int sev_dbg_crypt(struct kvm *kvm, struct kvm_sev_cmd *argp, bool dec)
 		size -= len;
 	}
 err:
+	return ret;
+}
+
+static int snp_issue_dbg_cmd(struct kvm *kvm, unsigned long src,
+			       unsigned long dst, int size,
+			       int *error, bool enc)
+{
+	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
+	struct sev_data_snp_dbg data;
+
+	data.gctx_paddr = __psp_pa(sev->snp_context);
+	data.dst_addr = dst;
+	data.src_addr = src;
+	data.len = size;
+
+	return sev_issue_cmd(kvm,
+			     enc ? SEV_CMD_SNP_DBG_ENCRYPT : SEV_CMD_SNP_DBG_DECRYPT,
+			     &data, error);
+}
+
+static int snp_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
+			     unsigned long dst_paddr, int sz, int *err)
+{
+	int offset;
+
+	/*
+	 * Its safe to read more than we are asked, caller should ensure that
+	 * destination has enough space.
+	 */
+	offset = src_paddr & 15;
+	src_paddr = round_down(src_paddr, 16);
+	sz = round_up(sz + offset, 16);
+
+	return snp_issue_dbg_cmd(kvm, src_paddr, dst_paddr, sz, err, false);
+}
+
+static int snp_dbg_decrypt_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
+{
+	struct kvm_sev_dbg debug;
+	struct vcpu_svm *svm;
+	hpa_t src_paddr;
+	hpa_t dst_paddr;
+	void *vmsa;
+	int ret;
+
+	if (copy_from_user(&debug, (void __user *)(uintptr_t)argp->data, sizeof(debug)))
+		return -EFAULT;
+
+	if (debug.len != PAGE_SIZE || debug.src_uaddr != (uint64_t) CPC_VMSA_MAGIC_ADDR)
+		return -EINVAL;
+
+	vmsa = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!vmsa) return -ENOMEM;
+	memset(vmsa, 0, PAGE_SIZE);
+
+	svm = to_svm(xa_load(&kvm->vcpu_array, 0));
+	src_paddr = __pa(svm->sev_es.vmsa);
+	dst_paddr = __pa(vmsa);
+	ret = snp_dbg_decrypt(kvm, src_paddr, dst_paddr, PAGE_SIZE, &argp->error);
+
+	if (copy_to_user((void __user *) debug.dst_uaddr, vmsa, PAGE_SIZE))
+		ret = -EFAULT;
+
+	kfree(vmsa);
+
 	return ret;
 }
 
@@ -2409,7 +2474,10 @@ int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
 		r = sev_guest_status(kvm, &sev_cmd);
 		break;
 	case KVM_SEV_DBG_DECRYPT:
-		r = sev_dbg_crypt(kvm, &sev_cmd, true);
+		if (sev_snp_guest(kvm))
+			r = snp_dbg_decrypt_vmsa(kvm, &sev_cmd);
+		else
+			r = sev_dbg_crypt(kvm, &sev_cmd, true);
 		break;
 	case KVM_SEV_DBG_ENCRYPT:
 		r = sev_dbg_crypt(kvm, &sev_cmd, false);

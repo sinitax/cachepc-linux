@@ -3852,29 +3852,27 @@ static int handle_mmio_page_fault(struct kvm_vcpu *vcpu, u64 addr, bool direct)
 static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 					 struct kvm_page_fault *fault)
 {
-	int active;
+	return cachepc_page_fault_handle(vcpu, fault);
 
-	cachepc_page_fault_handle(vcpu, fault);
+	// /*
+	//  * guest is writing the page which is write tracked which can
+	//  * not be fixed by page fault handler.
+	//  */
+	// active = kvm_slot_page_track_is_active(vcpu->kvm,
+	// 	fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE);
+	// active |= kvm_slot_page_track_is_active(vcpu->kvm,
+	// 	fault->slot, fault->gfn, KVM_PAGE_TRACK_EXEC);
+	// active |= kvm_slot_page_track_is_active(vcpu->kvm,
+	// 	fault->slot, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+	// if (active) return true;
 
-	/*
-	 * guest is writing the page which is write tracked which can
-	 * not be fixed by page fault handler.
-	 */
-	active = kvm_slot_page_track_is_active(vcpu->kvm,
-		fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE);
-	active |= kvm_slot_page_track_is_active(vcpu->kvm,
-		fault->slot, fault->gfn, KVM_PAGE_TRACK_EXEC);
-	active |= kvm_slot_page_track_is_active(vcpu->kvm,
-		fault->slot, fault->gfn, KVM_PAGE_TRACK_ACCESS);
-	if (active) return true;
+	// if (unlikely(fault->rsvd))
+	// 	return false;
 
-	if (unlikely(fault->rsvd))
-		return false;
+	// if (!fault->present || !fault->write)
+	// 	return false;
 
-	if (!fault->present || !fault->write)
-		return false;
-
-	return false;
+	// return false;
 }
 
 static void shadow_page_table_clear_flood(struct kvm_vcpu *vcpu, gva_t addr)

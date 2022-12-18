@@ -2142,7 +2142,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 				/* we assume multiple new fetches are because of branch prediction..
 				 * need to do one more step to resolve, so retrack all */
 				list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
-					cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+					cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
 					list_del(&fault->list);
 					kfree(fault);
 				}
@@ -2153,14 +2153,19 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 				cachepc_apic_timer = 0;
 				return 1;
 			} else if (count == 1) {
+				fault = list_first_entry(&cachepc_faults, struct cpc_fault, list);
+
 				if (cachepc_inst_fault_err) {
 					/* retrack previous faulted page, current stays untracked */
 					cachepc_track_single(vcpu, cachepc_inst_fault_gfn,
-						KVM_PAGE_TRACK_ACCESS);
+						KVM_PAGE_TRACK_EXEC);
+					cachepc_send_track_page_event(cachepc_inst_fault_gfn,
+						fault->gfn, cachepc_retinst);
 				}
 
-				CPC_INFO("Swapping active inst fault gfn %llu -> %llu!\n", cachepc_inst_fault_gfn, fault->gfn);
-				fault = list_first_entry(&cachepc_faults, struct cpc_fault, list);
+				CPC_INFO("Swapping active inst fault gfn %llu -> %llu!\n",
+					cachepc_inst_fault_gfn, fault->gfn);
+
 				cachepc_inst_fault_gfn = fault->gfn;
 				cachepc_inst_fault_err = fault->err;
 			}
@@ -2170,18 +2175,18 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 			if (cachepc_inst_fault_gfn >= cachepc_track_start_gfn
 					&& cachepc_inst_fault_gfn < cachepc_track_end_gfn) {
 				CPC_INFO("EXEC TRACK in range!\n");
-				cachepc_send_track_event_single(cachepc_inst_fault_gfn,
-					cachepc_inst_fault_err, 0);
+				cachepc_send_track_step_event_single(cachepc_inst_fault_gfn,
+					cachepc_inst_fault_err, cachepc_retinst);
 				cachepc_single_step = true;
 				cachepc_apic_timer = 0;
 			} else {
 				cachepc_single_step = false;
 			}
-		} else {
+		} else if (cachepc_track_mode == CPC_TRACK_FULL) {
 			list_for_each_entry(fault, &cachepc_faults, list)
 				cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
 
-			cachepc_send_track_event(&cachepc_faults);
+			cachepc_send_track_step_event(&cachepc_faults);
 		}
 
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {

@@ -1058,6 +1058,21 @@ void kvm_tdp_mmu_invalidate_all_roots(struct kvm *kvm)
 	}
 }
 
+static u64 cachepc_protect_pte(u64 spte, int mode)
+{
+	if (mode == KVM_PAGE_TRACK_WRITE) {
+		spte &= ~PT_WRITABLE_MASK;
+	} else if (mode == KVM_PAGE_TRACK_ACCESS) {
+		spte &= ~PT_WRITABLE_MASK;
+		spte &= ~PT_PRESENT_MASK;
+		spte &= ~PT_USER_MASK;
+		spte |= PT64_NX_MASK;
+	} else if (mode == KVM_PAGE_TRACK_EXEC) {
+		spte |= PT64_NX_MASK;
+	}
+	return spte;
+}
+
 /*
  * Installs a last-level SPTE to handle a TDP page fault.
  * (NPT/EPT violation/misconfiguration)
@@ -1070,6 +1085,11 @@ static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
 	u64 new_spte;
 	int ret = RET_PF_FIXED;
 	bool wrprot = false;
+	int modes[] = {
+		KVM_PAGE_TRACK_EXEC,
+		KVM_PAGE_TRACK_ACCESS,
+	};
+	int i;
 
 	WARN_ON(sp->role.level != fault->goal_level);
 	if (unlikely(!fault->slot))
@@ -1078,6 +1098,15 @@ static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
 		wrprot = make_spte(vcpu, sp, fault->slot, ACC_ALL, iter->gfn,
 					 fault->pfn, iter->old_spte, fault->prefetch, true,
 					 fault->map_writable, &new_spte);
+
+	/* reprotect the spte according to tracking */
+	for (i = 0; i < 2; i++) {
+		if (kvm_slot_page_track_is_active(vcpu->kvm,
+				fault->slot, fault->gfn, modes[i])) {
+			new_spte = cachepc_protect_pte(new_spte, modes[i]);
+			break;
+		}
+	}
 
 	if (new_spte == iter->old_spte)
 		ret = RET_PF_SPURIOUS;
@@ -1827,16 +1856,7 @@ static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 			continue;
 
 		new_spte = iter.old_spte & ~shadow_mmu_writable_mask;
-		if (mode == KVM_PAGE_TRACK_WRITE) {
-			new_spte &= ~PT_WRITABLE_MASK;
-		} else if (mode == KVM_PAGE_TRACK_ACCESS) {
-			new_spte &= ~PT_WRITABLE_MASK;
-			new_spte &= ~PT_PRESENT_MASK;
-			new_spte &= ~PT_USER_MASK;
-			new_spte |= (0x1ULL << PT64_NX_SHIFT);
-		} else if (mode == KVM_PAGE_TRACK_EXEC) {
-			new_spte |= (0x1ULL << PT64_NX_SHIFT);
-		}
+		new_spte = cachepc_protect_pte(new_spte, mode);
 
 		if (new_spte == iter.old_spte)
 			break;
