@@ -2183,10 +2183,14 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 				cachepc_single_step = false;
 			}
 		} else if (cachepc_track_mode == CPC_TRACK_FULL) {
-			list_for_each_entry(fault, &cachepc_faults, list)
+			list_for_each_entry(fault, &cachepc_faults, list) {
 				cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+			}
 
 			cachepc_send_track_step_event(&cachepc_faults);
+
+			cachepc_single_step = true;
+			cachepc_apic_timer = 0;
 		}
 
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
