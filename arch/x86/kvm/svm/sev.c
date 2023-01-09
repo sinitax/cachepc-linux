@@ -1125,41 +1125,42 @@ err:
 	return ret;
 }
 
-static int snp_issue_dbg_cmd(struct kvm *kvm, unsigned long src,
-			       unsigned long dst, int size,
-			       int *error, bool enc)
-{
-	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
-	struct sev_data_snp_dbg data;
+// static int snp_issue_dbg_cmd(struct kvm *kvm, unsigned long src,
+// 			       unsigned long dst, int size,
+// 			       int *error, bool enc)
+// {
+// 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
+// 	struct sev_data_snp_dbg data;
+// 
+// 	data.gctx_paddr = __psp_pa(sev->snp_context);
+// 	data.dst_addr = dst;
+// 	data.src_addr = src;
+// 	data.len = size;
+// 
+// 	return sev_issue_cmd(kvm,
+// 			     enc ? SEV_CMD_SNP_DBG_ENCRYPT : SEV_CMD_SNP_DBG_DECRYPT,
+// 			     &data, error);
+// }
 
-	data.gctx_paddr = __psp_pa(sev->snp_context);
-	data.dst_addr = dst;
-	data.src_addr = src;
-	data.len = size;
-
-	return sev_issue_cmd(kvm,
-			     enc ? SEV_CMD_SNP_DBG_ENCRYPT : SEV_CMD_SNP_DBG_DECRYPT,
-			     &data, error);
-}
-
-static int snp_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
-			     unsigned long dst_paddr, int sz, int *err)
-{
-	int offset;
-
-	/*
-	 * Its safe to read more than we are asked, caller should ensure that
-	 * destination has enough space.
-	 */
-	offset = src_paddr & 15;
-	src_paddr = round_down(src_paddr, 16);
-	sz = round_up(sz + offset, 16);
-
-	return snp_issue_dbg_cmd(kvm, src_paddr, dst_paddr, sz, err, false);
-}
+// static int snp_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
+// 			     unsigned long dst_paddr, int sz, int *err)
+// {
+// 	int offset;
+// 
+// 	/*
+// 	 * Its safe to read more than we are asked, caller should ensure that
+// 	 * destination has enough space.
+// 	 */
+// 	offset = src_paddr & 15;
+// 	src_paddr = round_down(src_paddr, 16);
+// 	sz = round_up(sz + offset, 16);
+// 
+// 	return snp_issue_dbg_cmd(kvm, src_paddr, dst_paddr, sz, err, false);
+// }
 
 static int snp_dbg_decrypt_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 {
+	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
 	struct kvm_sev_dbg debug;
 	struct vcpu_svm *svm;
 	hpa_t src_paddr;
@@ -1180,7 +1181,9 @@ static int snp_dbg_decrypt_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	svm = to_svm(xa_load(&kvm->vcpu_array, 0));
 	src_paddr = __pa(svm->sev_es.vmsa);
 	dst_paddr = __pa(vmsa);
-	ret = snp_dbg_decrypt(kvm, src_paddr, dst_paddr, PAGE_SIZE, &argp->error);
+	ret = snp_guest_dbg_decrypt_page(__pa(sev->snp_context) >> PAGE_SHIFT,
+		src_paddr >> PAGE_SHIFT, dst_paddr >> PAGE_SHIFT, &argp->error);
+	if (ret) return ret;
 
 	if (copy_to_user((void __user *) debug.dst_uaddr, vmsa, PAGE_SIZE))
 		ret = -EFAULT;
