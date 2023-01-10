@@ -9330,11 +9330,17 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		vcpu->arch.complete_userspace_io = complete_hypercall_exit;
 		return 0;
 	}
-	case KVM_HC_CPC_VMMCALL:
+	case KVM_HC_CPC_VMMCALL_SIGNAL:
 		CPC_WARN("Intercepted VMMCALL %lu:%lu\n", a0, a1);
 		cachepc_send_guest_event(a0, a1);
 		ret = 0;
 		break;
+	case KVM_HC_CPC_VMMCALL_EXIT:
+		vcpu->run->exit_reason        = KVM_EXIT_HYPERCALL;
+		vcpu->run->hypercall.nr       = KVM_HC_CPC_VMMCALL_EXIT;
+		vcpu->run->hypercall.args[0]  = a0;
+		vcpu->run->hypercall.args[1]  = a1;
+		return 0;
 	default:
 		ret = -KVM_ENOSYS;
 		break;

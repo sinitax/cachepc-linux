@@ -26,10 +26,6 @@
 #include "trace.h"
 #include "pmu.h"
 
-#include "cachepc/cachepc.h"
-#include "cachepc/uapi.h"
-#include "cachepc/event.h"
-
 /*
  * Unlike "struct cpuinfo_x86.x86_capability", kvm_cpu_caps doesn't need to be
  * aligned to sizeof(unsigned long) because it's not accessed via bitops.

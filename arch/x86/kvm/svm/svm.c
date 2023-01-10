@@ -3933,8 +3933,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cpu = get_cpu();
 		WARN_ON(cpu != 2);
 
-		memset(cachepc_msrmts, 0,
-			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
+		memset(cachepc_msrmts, 0, L1_SETS);
 
 		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
 		__svm_sev_es_vcpu_run(vmcb_pa);
@@ -3957,8 +3956,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cpu = get_cpu();
 		WARN_ON(cpu != 2);
 
-		memset(cachepc_msrmts, 0,
-			cachepc_msrmts_count * sizeof(cpc_msrmt_t));
+		memset(cachepc_msrmts, 0, L1_SETS);
 
 		/*
 		 * Use a single vmcb (vmcb01 because it's always valid) for
