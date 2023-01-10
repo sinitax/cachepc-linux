@@ -1871,7 +1871,7 @@ static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 }
 
 bool cachepc_tdp_protect_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
-	gfn_t gfn, int min_level, int mode)
+	gfn_t gfn, int min_level, enum kvm_page_track_mode mode)
 {
 	struct kvm_mmu_page *root;
 	bool spte_set = false;
@@ -1882,7 +1882,6 @@ bool cachepc_tdp_protect_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 	return spte_set;
 }
-EXPORT_SYMBOL(cachepc_tdp_protect_gfn);
 
 /*
  * Removes write access on the last level SPTE mapping this GFN and unsets the
