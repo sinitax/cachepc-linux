@@ -3380,10 +3380,10 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (cachepc_debug && cachepc_track_mode != CPC_TRACK_NONE) {
+	if (cachepc_debug) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
-				pr_warn("KVM EXIT (%s)\n", codelut[i].name);
+				CPC_INFO("KVM EXIT (%s)\n", codelut[i].name);
 		}
 	}
 
