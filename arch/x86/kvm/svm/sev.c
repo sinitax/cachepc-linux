@@ -402,7 +402,7 @@ static int __sev_issue_cmd(int fd, int id, void *data, int *error)
 	return ret;
 }
 
-int sev_issue_cmd(struct kvm *kvm, int id, void *data, int *error)
+static int sev_issue_cmd(struct kvm *kvm, int id, void *data, int *error)
 {
 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
 
@@ -891,7 +891,7 @@ static int __sev_issue_dbg_cmd(struct kvm *kvm, unsigned long src,
 			     &data, error);
 }
 
-int __sev_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
+static int __sev_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
 			     unsigned long dst_paddr, int sz, int *err)
 {
 	int offset;
@@ -906,13 +906,6 @@ int __sev_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
 
 	return __sev_issue_dbg_cmd(kvm, src_paddr, dst_paddr, sz, err, false);
 }
-
-
-int sev_dbg_decrypt_ext(struct kvm *kvm, unsigned long src_paddr,
-			     unsigned long dst_paddr, int sz, int *err) {
-	return __sev_dbg_decrypt(kvm, src_paddr, dst_paddr, sz, err);
-}
-EXPORT_SYMBOL(sev_dbg_decrypt_ext);
 
 static int __sev_dbg_decrypt_user(struct kvm *kvm, unsigned long paddr,
 				  void __user *dst_uaddr,
@@ -1124,39 +1117,6 @@ static int sev_dbg_crypt(struct kvm *kvm, struct kvm_sev_cmd *argp, bool dec)
 err:
 	return ret;
 }
-
-// static int snp_issue_dbg_cmd(struct kvm *kvm, unsigned long src,
-// 			       unsigned long dst, int size,
-// 			       int *error, bool enc)
-// {
-// 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
-// 	struct sev_data_snp_dbg data;
-// 
-// 	data.gctx_paddr = __psp_pa(sev->snp_context);
-// 	data.dst_addr = dst;
-// 	data.src_addr = src;
-// 	data.len = size;
-// 
-// 	return sev_issue_cmd(kvm,
-// 			     enc ? SEV_CMD_SNP_DBG_ENCRYPT : SEV_CMD_SNP_DBG_DECRYPT,
-// 			     &data, error);
-// }
-
-// static int snp_dbg_decrypt(struct kvm *kvm, unsigned long src_paddr,
-// 			     unsigned long dst_paddr, int sz, int *err)
-// {
-// 	int offset;
-// 
-// 	/*
-// 	 * Its safe to read more than we are asked, caller should ensure that
-// 	 * destination has enough space.
-// 	 */
-// 	offset = src_paddr & 15;
-// 	src_paddr = round_down(src_paddr, 16);
-// 	sz = round_up(sz + offset, 16);
-// 
-// 	return snp_issue_dbg_cmd(kvm, src_paddr, dst_paddr, sz, err, false);
-// }
 
 static int snp_dbg_decrypt_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
 {

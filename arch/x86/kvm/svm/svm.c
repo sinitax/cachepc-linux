@@ -2085,22 +2085,6 @@ static int smi_interception(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-// static void hexdump(uint8_t *prev, uint8_t *cur, size_t len)
-// {
-//       size_t i;
-// 
-//       for (i = 0; i < len; i++) {
-//               //printk(KERN_CONT "%02X ", cur[i]);
-//               if (cur[i] != prev[i])
-//                       printk(KERN_CONT "%02X ", cur[i]);
-//               else
-//                       printk(KERN_CONT "   ");
-//               if ((i+1) % 16 == 0)
-//                       printk(KERN_CONT "\n");
-//       }
-//       printk(KERN_CONT "\n");
-// }
-
 static int intr_interception(struct kvm_vcpu *vcpu)
 {
 	struct vmcb_control_area *control;

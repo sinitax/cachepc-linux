@@ -68,12 +68,6 @@
 	\func 0x78, %r15
 .endm
 
-.macro barrier
-	mfence
-	mov $0x80000005,%eax
-	cpuid
-.endm
-
 /**
  * __svm_vcpu_run - Run a vCPU via a transition to SVM guest mode
  * @vmcb_pa:	unsigned long

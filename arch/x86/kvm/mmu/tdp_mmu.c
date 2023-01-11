@@ -1058,21 +1058,6 @@ void kvm_tdp_mmu_invalidate_all_roots(struct kvm *kvm)
 	}
 }
 
-static u64 cachepc_protect_pte(u64 spte, int mode)
-{
-	if (mode == KVM_PAGE_TRACK_WRITE) {
-		spte &= ~PT_WRITABLE_MASK;
-	} else if (mode == KVM_PAGE_TRACK_ACCESS) {
-		spte &= ~PT_WRITABLE_MASK;
-		spte &= ~PT_PRESENT_MASK;
-		spte &= ~PT_USER_MASK;
-		spte |= PT64_NX_MASK;
-	} else if (mode == KVM_PAGE_TRACK_EXEC) {
-		spte |= PT64_NX_MASK;
-	}
-	return spte;
-}
-
 /*
  * Installs a last-level SPTE to handle a TDP page fault.
  * (NPT/EPT violation/misconfiguration)

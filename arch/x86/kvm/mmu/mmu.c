@@ -1157,7 +1157,6 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
 	}
 }
 
-
 bool
 cachepc_spte_protect(u64 *sptep, bool pt_protect, enum kvm_page_track_mode mode)
 {
@@ -1170,20 +1169,7 @@ cachepc_spte_protect(u64 *sptep, bool pt_protect, enum kvm_page_track_mode mode)
 	if (pt_protect)
 		spte &= ~shadow_mmu_writable_mask;
 
-	if (mode == KVM_PAGE_TRACK_WRITE) {
-		spte &= ~PT_WRITABLE_MASK;
-	} else if (mode == KVM_PAGE_TRACK_RESET_ACCESS) {
-		spte &= ~PT_ACCESSED_MASK;
-	} else if (mode == KVM_PAGE_TRACK_ACCESS) {
-		spte &= ~PT_PRESENT_MASK;
-		spte &= ~PT_WRITABLE_MASK;
-		spte &= ~PT_USER_MASK;
-		spte |= (0x1ULL << PT64_NX_SHIFT);
-	} else if (mode == KVM_PAGE_TRACK_EXEC) {
-		spte |= (0x1ULL << PT64_NX_SHIFT);
-	} else if (mode == KVM_PAGE_TRACK_RESET_EXEC) {
-		spte &= ~(0x1ULL << PT64_NX_SHIFT);
-	}
+	spte = cachepc_protect_pte(spte, mode);
 
 	mmu_spte_update(sptep, spte);
 
@@ -1204,8 +1190,20 @@ bool cachepc_rmap_protect(struct kvm_rmap_head *rmap_head,
 
 	return flush;
 }
-
-static bool rmap_write_protect(struct kvm_rmap_head *rmap_head,
+/*
+ * Write-protect on the specified @sptep, @pt_protect indicates whether
+ * spte write-protection is caused by protecting shadow page table.
+ *
+ * Note: write protection is difference between dirty logging and spte
+ * protection:
+ * - for dirty logging, the spte can be set to writable at anytime if
+ *   its dirty bitmap is properly set.
+ * - for spte protection, the spte can be writable only after unsync-ing
+ *   shadow page.
+ *
+ * Return true if tlb need be flushed.
+ */
+ static bool rmap_write_protect(struct kvm_rmap_head *rmap_head,
 			       bool pt_protect)
 {
 	return cachepc_rmap_protect(rmap_head, pt_protect, KVM_PAGE_TRACK_WRITE);
