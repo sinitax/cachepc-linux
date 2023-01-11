@@ -1173,77 +1173,14 @@ EXPORT_SYMBOL_GPL(crypto_aes_set_key);
 	f_rl(bo, bi, 3, k);	\
 } while (0)
 
-#define L1_ASSOC 8
-#define L1_LINESIZE 64
-#define L1_SETS 64
-#define L1_SIZE (L1_SETS * L1_ASSOC * L1_LINESIZE)
-
-#define ACCESS_LINE(n) \
-	asm volatile ("mov (%0), %%rbx" \
-		: : "r"(((uint8_t*) L1) + n * L1_LINESIZE) : "rbx");
-
-#define DO_ACCESS_PATTERN() \
-	ACCESS_LINE(60) \
-	ACCESS_LINE(13) \
-	ACCESS_LINE(24) \
-	ACCESS_LINE(19) \
-	ACCESS_LINE(38) \
-	ACCESS_LINE(17) \
-	ACCESS_LINE( 2) \
-	ACCESS_LINE(12) \
-	ACCESS_LINE(22) \
-	ACCESS_LINE(46) \
-	ACCESS_LINE( 4) \
-	ACCESS_LINE(61) \
-	ACCESS_LINE( 5) \
-	ACCESS_LINE(14) \
-	ACCESS_LINE(11) \
-	ACCESS_LINE(35) \
-	ACCESS_LINE(45) \
-	ACCESS_LINE(10) \
-	ACCESS_LINE(49) \
-	ACCESS_LINE(56) \
-	ACCESS_LINE(27) \
-	ACCESS_LINE(37) \
-	ACCESS_LINE(63) \
-	ACCESS_LINE(54) \
-	ACCESS_LINE(55) \
-	ACCESS_LINE(29) \
-	ACCESS_LINE(48) \
-	ACCESS_LINE( 9) \
-	ACCESS_LINE(16) \
-	ACCESS_LINE(39) \
-	ACCESS_LINE(20) \
-	ACCESS_LINE(21) \
-	ACCESS_LINE(62) \
-	ACCESS_LINE( 0) \
-	ACCESS_LINE(34) \
-	ACCESS_LINE( 8) \
-	ACCESS_LINE(53) \
-	ACCESS_LINE(42) \
-	ACCESS_LINE(51) \
-	ACCESS_LINE(50) \
-	ACCESS_LINE(57) \
-	ACCESS_LINE( 7) \
-	ACCESS_LINE( 6) \
-	ACCESS_LINE(33) \
-	ACCESS_LINE(26) \
-
-uint8_t *L1 = NULL;
-
 static void crypto_aes_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
 {
 	int cpu;
 
-	if (L1 == NULL) {
-		L1 = kzalloc(L1_SETS * L1_LINESIZE, GFP_KERNEL);
-		BUG_ON(((uintptr_t)L1) % (L1_SETS * L1_LINESIZE) != 0);
-	}
-
-	pr_warn("CachePC-TEST: Running AES-Generic!");
+	CPC_WARN("Running AES-Generic!");
 
 	cpu = get_cpu();
-	DO_ACCESS_PATTERN()
+	CPC_DO_VMMCALL(SIGNAL, CPC_GUEST_START_TRACK, 0);
 
 	const struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
 	u32 b0[4], b1[4];
@@ -1281,7 +1218,7 @@ static void crypto_aes_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
 	put_unaligned_le32(b0[2], out + 8);
 	put_unaligned_le32(b0[3], out + 12);
 
-	DO_ACCESS_PATTERN();
+	CPC_DO_VMMCALL(SIGNAL, CPC_GUEST_STOP_TRACK, 0);
 	put_cpu();
 }
 
