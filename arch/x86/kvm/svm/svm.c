@@ -2094,13 +2094,19 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	++vcpu->stat.irq_exits;
 
+	if (cachepc_pause_vm) {
+		cachepc_send_pause_event();
+	}
+
 	if (cachepc_single_step) {
 		svm = to_svm(vcpu);
 		control = &svm->vmcb->control;
 
 		cachepc_rip = svm->sev_es.vmsa->rip;
-		if (!cachepc_rip_prev)
+		if (!cachepc_rip_prev_set) {
 			cachepc_rip_prev = cachepc_rip;
+			cachepc_rip_prev_set = true;
+		}
 		if (cachepc_rip == cachepc_rip_prev) {
 			cachepc_apic_timer += 1;
 			return 1;
@@ -2159,22 +2165,25 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 			if (cachepc_inst_fault_gfn >= cachepc_track_start_gfn
 					&& cachepc_inst_fault_gfn < cachepc_track_end_gfn) {
 				CPC_INFO("EXEC TRACK in range!\n");
-				cachepc_send_track_step_event_single(cachepc_inst_fault_gfn,
-					cachepc_inst_fault_err, cachepc_retinst);
+
 				cachepc_single_step = true;
 				cachepc_apic_timer = 0;
+
+				cachepc_send_track_step_event_single(cachepc_inst_fault_gfn,
+					cachepc_inst_fault_err, cachepc_retinst);
 			} else {
 				cachepc_single_step = false;
 			}
 		} else if (cachepc_track_mode == CPC_TRACK_FULL) {
 			list_for_each_entry(fault, &cachepc_faults, list) {
-				cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+				cachepc_track_single(vcpu, fault->gfn,
+					KVM_PAGE_TRACK_ACCESS);
 			}
-
-			cachepc_send_track_step_event(&cachepc_faults);
 
 			cachepc_single_step = true;
 			cachepc_apic_timer = 0;
+
+			cachepc_send_track_step_event(&cachepc_faults);
 		}
 
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
@@ -3377,10 +3386,13 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	};
 	size_t i;
 
+	if (!cachepc_single_step)
+		CPC_DBG("svm_invoke_exit_handler");
+
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (cachepc_debug) {
+	if (cachepc_debug && exit_code != SVM_EXIT_INTR) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
 				CPC_INFO("KVM EXIT (%s)\n", codelut[i].name);
@@ -3424,6 +3436,9 @@ static int svm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	struct vcpu_svm *svm = to_svm(vcpu);
 	struct kvm_run *kvm_run = vcpu->run;
 	u32 exit_code = svm->vmcb->control.exit_code;
+
+	if (!cachepc_single_step)
+		CPC_DBG("svm_handle_exit");
 
 	trace_kvm_exit(vcpu, KVM_ISA_SVM);
 
@@ -3909,9 +3924,9 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	if (sev_es_guest(vcpu->kvm)) {
 		if (cachepc_single_step && cachepc_apic_timer == 0) {
-			cachepc_apic_timer = 200;
+			cachepc_apic_timer = 150;
 			cachepc_retinst_prev = 0;
-			cachepc_rip_prev = 0;
+			cachepc_rip_prev_set = false;
 		}
 
 		cpu = get_cpu();
@@ -3927,15 +3942,12 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		if (cachepc_baseline_measure)
 			cachepc_update_baseline();
 
+		if (!cachepc_single_step)
+			CPC_DBG("post vcpu_run");
+
 		put_cpu();
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
-
-		if (cachepc_single_step && cachepc_apic_timer == 0) {
-			cachepc_apic_timer = 50;
-			cachepc_retinst_prev = 0;
-			cachepc_rip_prev = 0;
-		}
 
 		cpu = get_cpu();
 		WARN_ON(cpu != 2);

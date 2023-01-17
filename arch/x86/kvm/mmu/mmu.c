@@ -3928,6 +3928,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	int modes[] = {
 		KVM_PAGE_TRACK_EXEC,
 		KVM_PAGE_TRACK_ACCESS,
+		KVM_PAGE_TRACK_WRITE
 	};
 	struct cpc_fault *tmp, *alloc;
 	size_t count, i;
@@ -3936,12 +3937,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	/* return true if the page fault was related to tracking and should not be handled,
 	 * return false if the page fault should be handled */
 
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < 3; i++) {
 		if (kvm_slot_page_track_is_active(vcpu->kvm,
 				fault->slot, fault->gfn, modes[i]))
 			break;
 	}
-	if (i == 2) {
+	if (i == 3) {
 		CPC_INFO("Untracked page fault (gfn:%llu err:%u)\n",
 			fault->gfn, fault->error_code);
 		return false;
@@ -3959,6 +3960,8 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		count += 1;
 
 	if (cachepc_track_mode == CPC_TRACK_FULL) {
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
+
 		CPC_INFO("Got %lu. fault gfn:%llu err:%u\n", count + 1,
 			fault->gfn, fault->error_code);
 
@@ -3975,6 +3978,8 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		return false; /* setup untracked page */
 	} else if (cachepc_track_mode == CPC_TRACK_EXEC) {
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
+
 		if (!inst_fetch || !fault->present) return false;
 
 		if (count == 1)
@@ -3985,9 +3990,6 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
 
-		if (modes[i] != KVM_PAGE_TRACK_EXEC)
-			CPC_WARN("Wrong page track mode for TRACK_EXEC");
-
 		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
 		BUG_ON(!alloc);
 		alloc->gfn = fault->gfn;
@@ -3996,8 +3998,6 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		cachepc_single_step = true;
 		cachepc_apic_timer = 0;
-	} else if (cachepc_track_mode == CPC_TRACK_STUB) {
-		cachepc_send_track_step_event(&cachepc_faults);
 	}
 
 	return true;

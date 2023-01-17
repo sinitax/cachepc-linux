@@ -3192,6 +3192,8 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 	struct ghcb *ghcb;
 	u64 reason;
 
+	CPC_DBG("sev_es_validate_vgexit");
+
 	if (svm_map_ghcb(svm, &map))
 		return -EFAULT;
 
@@ -3232,12 +3234,13 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 			goto vmgexit_err;
 		break;
 	case SVM_EXIT_CPUID:
-		if (!ghcb_rax_is_valid(ghcb) ||
-		    !ghcb_rcx_is_valid(ghcb))
-			goto vmgexit_err;
-		if (ghcb_get_rax(ghcb) == 0xd)
-			if (!ghcb_xcr0_is_valid(ghcb))
-				goto vmgexit_err;
+		CPC_DBG("SVM_EXIT_CPUID %llu", ghcb_get_rax(ghcb));
+		// if (!ghcb_rax_is_valid(ghcb) ||
+		//     !ghcb_rcx_is_valid(ghcb))
+		// 	goto vmgexit_err;
+		// if (ghcb_get_rax(ghcb) == 0xd)
+		// 	if (!ghcb_xcr0_is_valid(ghcb))
+		// 		goto vmgexit_err;
 		break;
 	case SVM_EXIT_INVD:
 		break;
@@ -3261,6 +3264,7 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 		}
 		break;
 	case SVM_EXIT_VMMCALL:
+		CPC_DBG("SVM_EXIT_CPUID %llu", ghcb_get_rax(ghcb));
 		// if (!ghcb_rax_is_valid(ghcb) ||
 		//     !ghcb_cpl_is_valid(ghcb))
 		// 	goto vmgexit_err;
@@ -4214,6 +4218,8 @@ int sev_handle_vmgexit(struct kvm_vcpu *vcpu)
 	struct vmcb_control_area *control = &svm->vmcb->control;
 	u64 ghcb_gpa, exit_code;
 	int ret;
+
+	CPC_DBG("sev_handle_vgexit");
 
 	/* Validate the GHCB */
 	ghcb_gpa = control->ghcb_gpa;

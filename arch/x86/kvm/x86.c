@@ -9331,12 +9331,12 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		return 0;
 	}
 	case KVM_HC_CPC_VMMCALL_SIGNAL:
-		CPC_DEBUG("SIGNAL VMMCALL %lu:%lu\n", a0, a1);
+		CPC_DBG("SIGNAL VMMCALL %lu:%lu\n", a0, a1);
 		cachepc_send_guest_event(a0, a1);
 		ret = 0;
 		break;
 	case KVM_HC_CPC_VMMCALL_EXIT:
-		CPC_DEBUG("EXIT VMMCALL %lu:%lu\n", a0, a1);
+		CPC_DBG("EXIT VMMCALL %lu:%lu\n", a0, a1);
 		vcpu->run->exit_reason        = KVM_EXIT_HYPERCALL;
 		vcpu->run->hypercall.nr       = KVM_HC_CPC_VMMCALL_EXIT;
 		vcpu->run->hypercall.args[0]  = a0;
