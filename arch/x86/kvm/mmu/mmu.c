@@ -3973,8 +3973,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		alloc->err = fault->error_code;
 		list_add_tail(&alloc->list, &cachepc_faults);
 
-		cachepc_single_step = true;
-		cachepc_apic_timer = 0;
+		cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
 
 		return false; /* setup untracked page */
 	} else if (cachepc_track_mode == CPC_TRACK_EXEC) {
@@ -3996,8 +3995,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		alloc->err = fault->error_code;
 		list_add_tail(&alloc->list, &cachepc_faults);
 
-		cachepc_single_step = true;
-		cachepc_apic_timer = 0;
+		cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
+	} else if (cachepc_track_mode == CPC_TRACK_FAULT_NO_RUN) {
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
+
+		cachepc_send_track_step_event_single(
+			fault->gfn, fault->error_code, cachepc_retinst);
 	}
 
 	return true;

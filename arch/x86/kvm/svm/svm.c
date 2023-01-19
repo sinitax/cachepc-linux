@@ -2085,8 +2085,32 @@ static int smi_interception(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+static void hexdump_diff(const uint8_t *old, const uint8_t *new, size_t size)
+{
+	size_t i;
+
+	if (!memcmp(old, new, size))
+		return;
+
+	printk("HEXDUMP DIFF\n");
+	for (i = 0; i < size; i++) {
+		if (i && i % 16 == 0)
+			printk(KERN_CONT "\n");
+		if (i % 16 == 0)
+			printk("%04lX: ", i);
+		if (old[i] != new[i])
+			printk(KERN_CONT "[%02X] ", old[i]);
+		else
+			printk(KERN_CONT " %02X  ", new[i]);
+	}
+	printk(KERN_CONT "\n");
+}
+
 static int intr_interception(struct kvm_vcpu *vcpu)
 {
+	static struct sev_es_save_area prev_vmsa;
+	static struct vcpu_svm prev_state;
+	static uint8_t ghcb_sa_buf[2* PAGE_SIZE];
 	struct vmcb_control_area *control;
 	struct vcpu_svm *svm;
 	struct cpc_fault *fault, *next;
@@ -2094,13 +2118,29 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	++vcpu->stat.irq_exits;
 
-	if (cachepc_pause_vm) {
+	if (cachepc_pause_vm)
 		cachepc_send_pause_event();
-	}
 
-	if (cachepc_single_step) {
+	if (cachepc_singlestep) {
 		svm = to_svm(vcpu);
 		control = &svm->vmcb->control;
+
+		if (cachepc_debug) {
+			hexdump_diff((const uint8_t *)&prev_vmsa,
+				(const uint8_t *)svm->sev_es.vmsa, sizeof(prev_vmsa));
+			memcpy(&prev_vmsa, svm->sev_es.vmsa, sizeof(prev_vmsa));
+
+			hexdump_diff((const uint8_t *)&prev_state,
+				(const uint8_t *)&svm->sev_es, sizeof(prev_state));
+			memcpy(&prev_state, &svm->sev_es, sizeof(prev_state));
+
+			if (svm->sev_es.ghcb_sa) {
+				hexdump_diff(ghcb_sa_buf,
+					(const uint8_t *)svm->sev_es.ghcb_sa,
+					sizeof(ghcb_sa_buf));
+				memcpy(ghcb_sa_buf, svm->sev_es.ghcb_sa, svm->sev_es.ghcb_sa_len);
+			}
+		}
 
 		cachepc_rip = svm->sev_es.vmsa->rip;
 		if (!cachepc_rip_prev_set) {
@@ -2108,9 +2148,11 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 			cachepc_rip_prev_set = true;
 		}
 		if (cachepc_rip == cachepc_rip_prev) {
+			CPC_DBG("No RIP change (%llu)\n", cachepc_rip);
 			cachepc_apic_timer += 1;
 			return 1;
 		}
+		cachepc_rip_prev = cachepc_rip;
 		CPC_INFO("Detected RIP change! (%u)\n", cachepc_apic_timer);
 
 		// if (!cachepc_retinst_prev)
@@ -2139,8 +2181,6 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 				CPC_INFO("Single stepping to resolve multiple fetch gfns\n");
 
-				cachepc_single_step = true;
-				cachepc_apic_timer = 0;
 				return 1;
 			} else if (count == 1) {
 				fault = list_first_entry(&cachepc_faults, struct cpc_fault, list);
@@ -2166,13 +2206,8 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 					&& cachepc_inst_fault_gfn < cachepc_track_end_gfn) {
 				CPC_INFO("EXEC TRACK in range!\n");
 
-				cachepc_single_step = true;
-				cachepc_apic_timer = 0;
-
 				cachepc_send_track_step_event_single(cachepc_inst_fault_gfn,
 					cachepc_inst_fault_err, cachepc_retinst);
-			} else {
-				cachepc_single_step = false;
 			}
 		} else if (cachepc_track_mode == CPC_TRACK_FULL) {
 			list_for_each_entry(fault, &cachepc_faults, list) {
@@ -2180,11 +2215,10 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 					KVM_PAGE_TRACK_ACCESS);
 			}
 
-			cachepc_single_step = true;
-			cachepc_apic_timer = 0;
-
 			cachepc_send_track_step_event(&cachepc_faults);
 		}
+
+		cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
 
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
 			list_del(&fault->list);
@@ -3386,13 +3420,10 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	};
 	size_t i;
 
-	if (!cachepc_single_step)
-		CPC_DBG("svm_invoke_exit_handler");
-
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (cachepc_debug && exit_code != SVM_EXIT_INTR) {
+	if (cachepc_debug) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
 				CPC_INFO("KVM EXIT (%s)\n", codelut[i].name);
@@ -3436,9 +3467,6 @@ static int svm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	struct vcpu_svm *svm = to_svm(vcpu);
 	struct kvm_run *kvm_run = vcpu->run;
 	u32 exit_code = svm->vmcb->control.exit_code;
-
-	if (!cachepc_single_step)
-		CPC_DBG("svm_handle_exit");
 
 	trace_kvm_exit(vcpu, KVM_ISA_SVM);
 
@@ -3922,18 +3950,20 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	guest_state_enter_irqoff();
 
+	cpu = get_cpu();
+	WARN_ON(cpu != 2);
+
+	memset(cachepc_msrmts, 0, L1_SETS);
+
+	if (cachepc_singlestep_reset) {
+		cachepc_apic_timer = 100 * CPC_APIC_TIMER_SOFTDIV;
+		cachepc_retinst = 0;
+		cachepc_rip_prev_set = false;
+		cachepc_singlestep = true;
+		cachepc_singlestep_reset = false;
+	}
+
 	if (sev_es_guest(vcpu->kvm)) {
-		if (cachepc_single_step && cachepc_apic_timer == 0) {
-			cachepc_apic_timer = 150;
-			cachepc_retinst_prev = 0;
-			cachepc_rip_prev_set = false;
-		}
-
-		cpu = get_cpu();
-		WARN_ON(cpu != 2);
-
-		memset(cachepc_msrmts, 0, L1_SETS);
-
 		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
 		__svm_sev_es_vcpu_run(vmcb_pa);
 		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
@@ -3941,18 +3971,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cachepc_save_msrmts(cachepc_ds);
 		if (cachepc_baseline_measure)
 			cachepc_update_baseline();
-
-		if (!cachepc_single_step)
-			CPC_DBG("post vcpu_run");
-
-		put_cpu();
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
-
-		cpu = get_cpu();
-		WARN_ON(cpu != 2);
-
-		memset(cachepc_msrmts, 0, L1_SETS);
 
 		/*
 		 * Use a single vmcb (vmcb01 because it's always valid) for
@@ -3973,9 +3993,17 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cachepc_save_msrmts(cachepc_ds);
 		if (cachepc_baseline_measure)
 			cachepc_update_baseline();
-
-		put_cpu();
 	}
+
+	if (!cachepc_singlestep)
+		CPC_DBG("post vcpu_run");
+
+	if (cachepc_singlestep) {
+		/* invalidate cached vmsa so rip is updated */
+		wbinvd();
+	}
+
+	put_cpu();
 
 	guest_state_exit_irqoff();
 }
