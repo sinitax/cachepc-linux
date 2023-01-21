@@ -29,44 +29,92 @@
 
 .section .noinstr.text, "ax"
 
+#include "../cachepc/macro.S"
+
 .extern cachepc_msrmts
 .extern cachepc_regs_tmp
 .extern cachepc_regs_vm
 
 .macro load_tmp off reg
-	mov cachepc_regs_tmp+\off(%rip), \reg
+	mov cachepc_regs_tmp+\off, \reg
 .endm
 
 .macro save_tmp off reg
-	mov \reg, cachepc_regs_tmp+\off(%rip)
+	mov \reg, cachepc_regs_tmp+\off
 .endm
 
 .macro load_vm off reg
-	mov cachepc_regs_vm+\off(%rip), \reg
+	mov cachepc_regs_vm+\off, \reg
 .endm
 
 .macro save_vm off reg
-	mov \reg, cachepc_regs_vm+\off(%rip)
+	mov \reg, cachepc_regs_vm+\off
 .endm
 
 .macro apply_regs func
-	\func 0x00, %rax
-	\func 0x08, %rbx
-	\func 0x10, %rcx
-	\func 0x18, %rdx
-	\func 0x20, %rbp
-	\func 0x28, %rsp
-	\func 0x30, %rdi
-	\func 0x38, %rsi
-	\func 0x40, %r8
-	\func 0x48, %r9
-	\func 0x50, %r10
-	\func 0x58, %r11
-	\func 0x60, %r12
-	\func 0x68, %r13
-	\func 0x70, %r14
-	\func 0x78, %r15
+	\func 0x00 %rax
+	\func 0x08 %rbx
+	\func 0x10 %rcx
+	\func 0x18 %rdx
+	\func 0x20 %rbp
+	\func 0x28 %rsp
+	\func 0x30 %rdi
+	\func 0x38 %rsi
+	\func 0x40 %r8
+	\func 0x48 %r9
+	\func 0x50 %r10
+	\func 0x58 %r11
+	\func 0x60 %r12
+	\func 0x68 %r13
+	\func 0x70 %r14
+	\func 0x78 %r15
 .endm
+
+.macro wrap_prime name
+	apply_regs save_vm
+	apply_regs load_tmp
+
+	mov cachepc_singlestep, %rax
+	cmp $0, %rax
+	je skip_apic_\name
+
+	mov $0, %rdx
+	mov cachepc_apic_timer, %eax
+	mov $CPC_APIC_TIMER_SOFTDIV, %rbx
+	divq %rbx
+	mov %rax, %rdi
+	call cachepc_apic_oneshot
+skip_apic_\name:
+
+	mov cachepc_ds, %r15
+	mov CPC_CL_PREV_OFFSET(%r15), %r15
+
+	wbinvd
+
+	mov cachepc_ds, %r9
+	prime \name %r9 %r10 %r8
+	mov cachepc_ds, %r9
+	prime 1_\name %r9 %r10 %r8
+	mov cachepc_ds, %r9
+	prime 2_\name %r9 %r10 %r8
+
+    # mov cachepc_victim, %rax
+    # mov (%rax), %rax
+
+	apply_regs save_tmp
+	apply_regs load_vm
+.endm
+
+.macro wrap_probe name
+	apply_regs save_vm
+	apply_regs load_tmp
+
+	probe \name %r15 %r9 %r10 %r11 %r12
+
+	apply_regs save_tmp
+	apply_regs load_vm
+.endm
+
 
 /**
  * __svm_vcpu_run - Run a vCPU via a transition to SVM guest mode
@@ -122,26 +170,9 @@ SYM_FUNC_START(__svm_vcpu_run)
 	sti
 
 1:	
-	apply_regs save_vm
-	apply_regs load_tmp
-	mov cachepc_ds, %rsi
-	mov 0x8(%rsi), %r15
-	lea sev_prime_ret(%rip), %rdi
-	jmp cachepc_prime_vcall+5+1 // skip stack pushs
-sev_prime_ret:
-	apply_regs save_tmp
-	apply_regs load_vm
-
+	wrap_prime sev_vcpu_run
 	vmrun %_ASM_AX
-
-	apply_regs save_vm
-	apply_regs load_tmp
-	mov %r15, %rsi
-	lea sev_probe_ret(%rip), %rdi
-	jmp cachepc_probe_vcall+5+8 // skip stack pushs
-sev_probe_ret:
-	apply_regs save_tmp
-	apply_regs load_vm
+	wrap_probe sev_vcpu_run
 
 2:	cli
 
@@ -246,26 +277,9 @@ SYM_FUNC_START(__svm_sev_es_vcpu_run)
 
 1:	
 
-	apply_regs save_vm
-	apply_regs load_tmp
-	mov cachepc_ds, %rsi
-	mov 0x8(%rsi), %r15
-	lea sev_es_prime_ret(%rip), %rdi
-	jmp cachepc_prime_vcall+5+1 // skip stack pushes
-sev_es_prime_ret:
-	apply_regs save_tmp
-	apply_regs load_vm
-
+	wrap_prime sev_es_vcpu_run
 	vmrun %_ASM_AX
-
-	apply_regs save_vm
-	apply_regs load_tmp
-	mov %r15, %rsi
-	lea sev_es_probe_ret(%rip), %rdi
-	jmp cachepc_probe_vcall+5+8 // skip stack pushs
-sev_es_probe_ret:
-	apply_regs save_tmp
-	apply_regs load_vm
+	wrap_probe sev_es_vcpu_run
 
 2:	cli
 

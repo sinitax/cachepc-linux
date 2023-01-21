@@ -2118,9 +2118,6 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	++vcpu->stat.irq_exits;
 
-	if (cachepc_pause_vm)
-		cachepc_send_pause_event();
-
 	if (cachepc_singlestep) {
 		svm = to_svm(vcpu);
 		control = &svm->vmcb->control;
@@ -3969,8 +3966,6 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
 
 		cachepc_save_msrmts(cachepc_ds);
-		if (cachepc_baseline_measure)
-			cachepc_update_baseline();
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
 
@@ -3991,8 +3986,6 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cachepc_inst_fault_retinst += cachepc_retinst;
 
 		cachepc_save_msrmts(cachepc_ds);
-		if (cachepc_baseline_measure)
-			cachepc_update_baseline();
 	}
 
 	if (!cachepc_singlestep)
@@ -4004,6 +3997,9 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	}
 
 	put_cpu();
+
+	if (cachepc_pause_vm)
+		cachepc_send_pause_event();
 
 	guest_state_exit_irqoff();
 }

@@ -12,7 +12,7 @@ include $(srctree)/virt/kvm/Makefile.kvm
 kvm-y			+= x86.o emulate.o i8259.o irq.o lapic.o \
 			   i8254.o ioapic.o irq_comm.o cpuid.o pmu.o mtrr.o \
 			   hyperv.o debugfs.o mmu/page_track.o mmu/mmu.o mmu/spte.o \
-			   cachepc/cachepc.o cachepc/kvm.o cachepc/track.o cachepc/event.o
+			   cachepc/cachepc.o cachepc/asm.o cachepc/kvm.o cachepc/track.o cachepc/event.o
 
 ifdef CONFIG_HYPERV
 kvm-y			+= kvm_onhyperv.o
@@ -26,7 +26,8 @@ kvm-intel-y		+= vmx/vmx.o vmx/vmenter.o vmx/pmu_intel.o vmx/vmcs12.o \
 kvm-intel-$(CONFIG_X86_SGX_KVM)	+= vmx/sgx.o
 
 kvm-amd-y		+= svm/svm.o svm/vmenter.o svm/pmu.o svm/nested.o \
-				   svm/avic.o svm/sev.o cachepc/cachepc.o cachepc/event.o
+				   svm/avic.o svm/sev.o cachepc/cachepc.o cachepc/event.o \
+				   cachepc/asm.o
 
 ifdef CONFIG_HYPERV
 kvm-amd-y		+= svm/svm_onhyperv.o
