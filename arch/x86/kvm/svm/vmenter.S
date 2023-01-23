@@ -74,8 +74,8 @@
 	apply_regs save_vm
 	apply_regs load_tmp
 
-	mov cachepc_singlestep, %rax
-	cmp $0, %rax
+	movb cachepc_apic_oneshot, %al
+	cmp $0, %al
 	je skip_apic_\name
 
 	mov $0, %rdx
@@ -83,7 +83,7 @@
 	mov $CPC_APIC_TIMER_SOFTDIV, %rbx
 	divq %rbx
 	mov %rax, %rdi
-	call cachepc_apic_oneshot
+	call cachepc_apic_oneshot_run
 skip_apic_\name:
 
 	mov cachepc_ds, %r15
@@ -93,13 +93,8 @@ skip_apic_\name:
 
 	mov cachepc_ds, %r9
 	prime \name %r9 %r10 %r8
-	mov cachepc_ds, %r9
 	prime 1_\name %r9 %r10 %r8
-	mov cachepc_ds, %r9
 	prime 2_\name %r9 %r10 %r8
-
-    # mov cachepc_victim, %rax
-    # mov (%rax), %rax
 
 	apply_regs save_tmp
 	apply_regs load_vm

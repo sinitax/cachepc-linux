@@ -2122,7 +2122,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		svm = to_svm(vcpu);
 		control = &svm->vmcb->control;
 
-		if (cachepc_debug) {
+		if (cachepc_debug && 0) {
 			hexdump_diff((const uint8_t *)&prev_vmsa,
 				(const uint8_t *)svm->sev_es.vmsa, sizeof(prev_vmsa));
 			memcpy(&prev_vmsa, svm->sev_es.vmsa, sizeof(prev_vmsa));
@@ -2139,13 +2139,19 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 			}
 		}
 
-		cachepc_rip = svm->sev_es.vmsa->rip;
+		if (sev_es_guest(vcpu->kvm)) {
+			cachepc_rip = svm->sev_es.vmsa->rip;
+		} else {
+			cachepc_rip = kvm_rip_read(vcpu);
+		}
+
 		if (!cachepc_rip_prev_set) {
 			cachepc_rip_prev = cachepc_rip;
 			cachepc_rip_prev_set = true;
 		}
 		if (cachepc_rip == cachepc_rip_prev) {
-			CPC_DBG("No RIP change (%llu)\n", cachepc_rip);
+			CPC_DBG("No RIP change (%llu,%u)\n",
+				cachepc_rip, cachepc_apic_timer);
 			cachepc_apic_timer += 1;
 			return 1;
 		}
@@ -2158,6 +2164,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		// 	cachepc_apic_timer += 1;
 		// 	return 1;
 		// }
+		// cachepc_retinst_prev = cachepc_retinst;
 		// CPC_INFO("Detected RETINST change! (%llu,%u)\n",
 		// 	cachepc_retinst, cachepc_apic_timer);
 
@@ -3952,20 +3959,26 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	memset(cachepc_msrmts, 0, L1_SETS);
 
+	cachepc_retinst = 0;
 	if (cachepc_singlestep_reset) {
 		cachepc_apic_timer = 100 * CPC_APIC_TIMER_SOFTDIV;
-		cachepc_retinst = 0;
 		cachepc_rip_prev_set = false;
 		cachepc_singlestep = true;
 		cachepc_singlestep_reset = false;
 	}
 
-	if (sev_es_guest(vcpu->kvm)) {
-		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
-		__svm_sev_es_vcpu_run(vmcb_pa);
-		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
+	if (cachepc_long_step) {
+		WARN_ON(cachepc_singlestep);
+		cachepc_apic_timer = 500000 * CPC_APIC_TIMER_SOFTDIV;
+		cachepc_apic_oneshot = true;
+	} else if (cachepc_singlestep) {
+		cachepc_apic_oneshot = true;
+	}
 
-		cachepc_save_msrmts(cachepc_ds);
+	cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
+
+	if (sev_es_guest(vcpu->kvm)) {
+		__svm_sev_es_vcpu_run(vmcb_pa);
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
 
@@ -3979,27 +3992,28 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		__svm_vcpu_run(vmcb_pa, (unsigned long *)&vcpu->arch.regs);
 		vmsave(svm->vmcb01.pa);
 
-		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
 		vmload(__sme_page_pa(sd->save_area));
-		cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
-
-		cachepc_inst_fault_retinst += cachepc_retinst;
-
-		cachepc_save_msrmts(cachepc_ds);
 	}
+
+	cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
+
+	cachepc_save_msrmts(cachepc_ds);
+
+	cachepc_apic_oneshot = false;
 
 	if (!cachepc_singlestep)
-		CPC_DBG("post vcpu_run");
+		CPC_DBG("post vcpu_run\n");
 
-	if (cachepc_singlestep) {
-		/* invalidate cached vmsa so rip is updated */
+	/* invalidate cached vmsa so rip is updated */
+	if (cachepc_singlestep)
 		wbinvd();
-	}
 
 	put_cpu();
 
-	if (cachepc_pause_vm)
+	if (cachepc_pause_vm) {
+		CPC_DBG("pausing vm..\n");
 		cachepc_send_pause_event();
+	}
 
 	guest_state_exit_irqoff();
 }
