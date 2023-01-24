@@ -3931,11 +3931,11 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		KVM_PAGE_TRACK_WRITE
 	};
 	struct cpc_fault *tmp, *alloc;
+	struct cpc_track_exec *exec;
 	size_t count, i;
 	bool inst_fetch;
 
-	/* return true if the page fault was related to tracking and should not be handled,
-	 * return false if the page fault should be handled */
+	/* returns true if the page fault should not be handled */
 
 	for (i = 0; i < 3; i++) {
 		if (kvm_slot_page_track_is_active(vcpu->kvm,
@@ -3962,7 +3962,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	if (cachepc_track_mode == CPC_TRACK_FULL) {
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
 
-		CPC_INFO("Got %lu. fault gfn:%llu err:%u\n", count + 1,
+		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
 			fault->gfn, fault->error_code);
 
 		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
@@ -3978,24 +3978,26 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		return false; /* setup untracked page */
 	} else if (cachepc_track_mode == CPC_TRACK_EXEC) {
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
+		exec = &cachepc_track_exec;
 
 		if (!inst_fetch || !fault->present) return false;
 
-		if (count == 1)
-			return false; /* dont untrack, but 'handle' */
-
-		CPC_INFO("Got %lu. fault gfn:%llu err:%u\n", count + 1,
+		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
 			fault->gfn, fault->error_code);
 
-		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
-
-		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
-		BUG_ON(!alloc);
-		alloc->gfn = fault->gfn;
-		alloc->err = fault->error_code;
-		list_add_tail(&alloc->list, &cachepc_faults);
-
-		cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
+		if (!exec->cur_avail) {
+			cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+			exec->cur_gfn = fault->gfn;
+			exec->cur_avail = true;
+			exec->retinst = 0;
+		} else {
+			cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+			cachepc_track_single(vcpu, exec->cur_gfn, modes[i]);
+			cachepc_send_track_page_event(exec->cur_gfn,
+				fault->gfn, exec->retinst);
+			exec->retinst = 0;
+			exec->cur_gfn = fault->gfn;
+		}
 	} else if (cachepc_track_mode == CPC_TRACK_FAULT_NO_RUN) {
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
 

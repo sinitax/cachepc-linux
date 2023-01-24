@@ -2118,116 +2118,84 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	++vcpu->stat.irq_exits;
 
-	if (cachepc_singlestep) {
-		svm = to_svm(vcpu);
-		control = &svm->vmcb->control;
+	if (!cachepc_singlestep)
+		return 1;
 
-		if (cachepc_debug && 0) {
-			hexdump_diff((const uint8_t *)&prev_vmsa,
-				(const uint8_t *)svm->sev_es.vmsa, sizeof(prev_vmsa));
-			memcpy(&prev_vmsa, svm->sev_es.vmsa, sizeof(prev_vmsa));
+	svm = to_svm(vcpu);
+	control = &svm->vmcb->control;
 
-			hexdump_diff((const uint8_t *)&prev_state,
-				(const uint8_t *)&svm->sev_es, sizeof(prev_state));
-			memcpy(&prev_state, &svm->sev_es, sizeof(prev_state));
+	if (cachepc_debug && 0) {
+		hexdump_diff((const uint8_t *)&prev_vmsa,
+			(const uint8_t *)svm->sev_es.vmsa, sizeof(prev_vmsa));
+		memcpy(&prev_vmsa, svm->sev_es.vmsa, sizeof(prev_vmsa));
 
-			if (svm->sev_es.ghcb_sa) {
-				hexdump_diff(ghcb_sa_buf,
-					(const uint8_t *)svm->sev_es.ghcb_sa,
-					sizeof(ghcb_sa_buf));
-				memcpy(ghcb_sa_buf, svm->sev_es.ghcb_sa, svm->sev_es.ghcb_sa_len);
-			}
+		hexdump_diff((const uint8_t *)&prev_state,
+			(const uint8_t *)&svm->sev_es, sizeof(prev_state));
+		memcpy(&prev_state, &svm->sev_es, sizeof(prev_state));
+
+		if (svm->sev_es.ghcb_sa) {
+			hexdump_diff(ghcb_sa_buf,
+				(const uint8_t *)svm->sev_es.ghcb_sa,
+				sizeof(ghcb_sa_buf));
+			memcpy(ghcb_sa_buf, svm->sev_es.ghcb_sa, svm->sev_es.ghcb_sa_len);
 		}
+	}
 
-		if (sev_es_guest(vcpu->kvm)) {
-			cachepc_rip = svm->sev_es.vmsa->rip;
-		} else {
-			cachepc_rip = kvm_rip_read(vcpu);
-		}
+	if (sev_es_guest(vcpu->kvm)) {
+		cachepc_rip = svm->sev_es.vmsa->rip;
+	} else {
+		cachepc_rip = kvm_rip_read(vcpu);
+	}
 
-		if (!cachepc_rip_prev_set) {
-			cachepc_rip_prev = cachepc_rip;
-			cachepc_rip_prev_set = true;
-		}
-		if (cachepc_rip == cachepc_rip_prev) {
-			CPC_DBG("No RIP change (%llu,%u)\n",
-				cachepc_rip, cachepc_apic_timer);
-			cachepc_apic_timer += 1;
-			return 1;
-		}
+	if (!cachepc_rip_prev_set) {
 		cachepc_rip_prev = cachepc_rip;
-		CPC_INFO("Detected RIP change! (%u)\n", cachepc_apic_timer);
+		cachepc_rip_prev_set = true;
+	}
+	if (cachepc_rip == cachepc_rip_prev) {
+		CPC_DBG("No RIP change (%llu,%u)\n",
+			cachepc_rip, cachepc_apic_timer);
+		cachepc_apic_timer += 1;
+		return 1;
+	}
+	cachepc_rip_prev = cachepc_rip;
+	CPC_INFO("Detected RIP change! (%u)\n", cachepc_apic_timer);
 
-		// if (!cachepc_retinst_prev)
-		// 	cachepc_retinst_prev = cachepc_retinst;
-		// if (cachepc_retinst_prev == cachepc_retinst) {
-		// 	cachepc_apic_timer += 1;
-		// 	return 1;
-		// }
-		// cachepc_retinst_prev = cachepc_retinst;
-		// CPC_INFO("Detected RETINST change! (%llu,%u)\n",
-		// 	cachepc_retinst, cachepc_apic_timer);
+	// if (!cachepc_retinst_prev)
+	// 	cachepc_retinst_prev = cachepc_retinst;
+	// if (cachepc_retinst_prev == cachepc_retinst) {
+	// 	cachepc_apic_timer += 1;
+	// 	return 1;
+	// }
+	// cachepc_retinst_prev = cachepc_retinst;
+	// CPC_INFO("Detected RETINST change! (%llu,%u)\n",
+	// 	cachepc_retinst, cachepc_apic_timer);
 
-		count = 0;
-		list_for_each_entry(fault, &cachepc_faults, list)
-			count += 1;
-		CPC_INFO("Caught single step with %lu faults!\n", count);
+	count = 0;
+	list_for_each_entry(fault, &cachepc_faults, list)
+		count += 1;
+	CPC_INFO("Caught single step with %lu faults!\n", count);
 
-		if (cachepc_track_mode == CPC_TRACK_EXEC) {
-			if (count > 1) {
-				/* we assume multiple new fetches are because of branch prediction..
-				 * need to do one more step to resolve, so retrack all */
-				list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
-					cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
-					list_del(&fault->list);
-					kfree(fault);
-				}
-
-				CPC_INFO("Single stepping to resolve multiple fetch gfns\n");
-
-				return 1;
-			} else if (count == 1) {
-				fault = list_first_entry(&cachepc_faults, struct cpc_fault, list);
-
-				if (cachepc_inst_fault_err) {
-					/* retrack previous faulted page, current stays untracked */
-					cachepc_track_single(vcpu, cachepc_inst_fault_gfn,
-						KVM_PAGE_TRACK_EXEC);
-					cachepc_send_track_page_event(cachepc_inst_fault_gfn,
-						fault->gfn, cachepc_retinst);
-				}
-
-				CPC_INFO("Swapping active inst fault gfn %llu -> %llu!\n",
-					cachepc_inst_fault_gfn, fault->gfn);
-
-				cachepc_inst_fault_gfn = fault->gfn;
-				cachepc_inst_fault_err = fault->err;
-			}
-
-			/* TODO: retrack cachepc_inst_fault_gfn when switching mode */
-
-			if (cachepc_inst_fault_gfn >= cachepc_track_start_gfn
-					&& cachepc_inst_fault_gfn < cachepc_track_end_gfn) {
-				CPC_INFO("EXEC TRACK in range!\n");
-
-				cachepc_send_track_step_event_single(cachepc_inst_fault_gfn,
-					cachepc_inst_fault_err, cachepc_retinst);
-			}
-		} else if (cachepc_track_mode == CPC_TRACK_FULL) {
-			list_for_each_entry(fault, &cachepc_faults, list) {
-				cachepc_track_single(vcpu, fault->gfn,
-					KVM_PAGE_TRACK_ACCESS);
-			}
-
-			cachepc_send_track_step_event(&cachepc_faults);
-		}
-
-		cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
-
+	if (cachepc_track_mode == CPC_TRACK_EXEC) {
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
+			cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
 			list_del(&fault->list);
 			kfree(fault);
 		}
+		cachepc_singlestep = false;
+	} else if (cachepc_track_mode == CPC_TRACK_FULL) {
+		list_for_each_entry(fault, &cachepc_faults, list) {
+			cachepc_track_single(vcpu, fault->gfn,
+				KVM_PAGE_TRACK_ACCESS);
+		}
+
+		cachepc_send_track_step_event(&cachepc_faults);
+	}
+
+	cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
+
+	list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
+		list_del(&fault->list);
+		kfree(fault);
 	}
 
 	return 1;
@@ -4000,6 +3968,9 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	cachepc_save_msrmts(cachepc_ds);
 
 	cachepc_apic_oneshot = false;
+
+	if (cachepc_track_mode == CPC_TRACK_EXEC)
+		cachepc_track_exec.retinst += cachepc_retinst;
 
 	if (!cachepc_singlestep)
 		CPC_DBG("post vcpu_run\n");
