@@ -3941,6 +3941,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cachepc_apic_oneshot = true;
 	} else if (cachepc_singlestep) {
 		cachepc_apic_oneshot = true;
+	} else {
+		cachepc_apic_oneshot = false;
 	}
 
 	cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC);
