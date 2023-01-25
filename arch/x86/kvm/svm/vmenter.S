@@ -86,9 +86,6 @@
 	call cachepc_apic_oneshot_run
 skip_apic_\name:
 
-	mov cachepc_ds, %r15
-	mov CPC_CL_PREV_OFFSET(%r15), %r15
-
 	wbinvd
 
 	mov cachepc_ds, %r9
@@ -104,7 +101,7 @@ skip_apic_\name:
 	apply_regs save_vm
 	apply_regs load_tmp
 
-	probe \name %r15 %r9 %r10 %r11 %r12
+	probe \name %r8 %r9 %r10 %r11 %r12
 
 	apply_regs save_tmp
 	apply_regs load_vm
