@@ -3440,6 +3440,11 @@ static int svm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	struct kvm_run *kvm_run = vcpu->run;
 	u32 exit_code = svm->vmcb->control.exit_code;
 
+	if (cachepc_pause_vm) {
+		CPC_DBG("Pausing vm..\n");
+		cachepc_send_pause_event();
+	}
+
 	trace_kvm_exit(vcpu, KVM_ISA_SVM);
 
 	/* SEV-ES guests must use the CR write traps to track CR registers. */
@@ -3983,17 +3988,17 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	put_cpu();
 
-	if (cachepc_pause_vm) {
-		CPC_DBG("pausing vm..\n");
-		cachepc_send_pause_event();
-	}
-
 	guest_state_exit_irqoff();
 }
 
 static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
+
+	if (cachepc_pause_vm) {
+		CPC_DBG("Pausing vm..\n");
+		cachepc_send_pause_event();
+	}
 
 	trace_kvm_entry(vcpu);
 
