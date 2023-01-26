@@ -2141,6 +2141,9 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		}
 	}
 
+	/* invalidate cached vmsa so rip is updated */
+	wbinvd();
+
 	if (sev_es_guest(vcpu->kvm)) {
 		cachepc_rip = svm->sev_es.vmsa->rip;
 	} else {
@@ -2176,26 +2179,39 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 	CPC_INFO("Caught single step with %lu faults!\n", count);
 
 	switch (cachepc_track_mode) {
+	case CPC_TRACK_PAGES_RESOLVE:
+		cpc_track_pages.step = false;
+		cachepc_singlestep = false;
+		fallthrough;
 	case CPC_TRACK_PAGES:
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
 			cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
 			list_del(&fault->list);
 			kfree(fault);
 		}
-		cachepc_singlestep = false;
 		break;
-	case CPC_TRACK_STEPS:
-	case CPC_TRACK_STEPS_SIGNALLED:
+	case CPC_TRACK_STEPS_AND_FAULTS:
 		list_for_each_entry(fault, &cachepc_faults, list) {
 			cachepc_track_single(vcpu, fault->gfn,
 				KVM_PAGE_TRACK_ACCESS);
 		}
-
 		cachepc_send_track_step_event(&cachepc_faults);
+		cachepc_singlestep = true;
+		break;
+	case CPC_TRACK_STEPS_SIGNALLED:
+		if (cpc_track_steps_signalled.enabled
+				&& cpc_track_steps_signalled.target_avail) {
+			cachepc_send_track_step_event_single(
+				cpc_track_steps_signalled.target_gfn,
+				0, cachepc_retinst);
+			cachepc_track_single(vcpu,
+				cpc_track_steps_signalled.target_gfn,
+				KVM_PAGE_TRACK_EXEC);
+			cachepc_prime_probe = false;
+			cachepc_singlestep = false;
+		}
 		break;
 	}
-
-	cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
 
 	list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
 		list_del(&fault->list);
@@ -3936,10 +3952,9 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	memset(cachepc_msrmts, 0, L1_SETS);
 
-	cachepc_retinst = 0;
 	if (cachepc_singlestep_reset) {
-		if (cachepc_apic_timer) {
-			cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
+		if (cachepc_apic_timer >= 150 * CPC_APIC_TIMER_SOFTDIV) {
+			cachepc_apic_timer -= 30 * CPC_APIC_TIMER_SOFTDIV;
 		} else {
 			cachepc_apic_timer = 100 * CPC_APIC_TIMER_SOFTDIV;
 		}
@@ -3985,15 +4000,12 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	cachepc_apic_oneshot = false;
 
-	if (cachepc_track_mode == CPC_TRACK_PAGES)
-		cachepc_track_exec.retinst += cachepc_retinst;
+	if (cachepc_track_mode == CPC_TRACK_PAGES
+			|| cachepc_track_mode == CPC_TRACK_PAGES_RESOLVE)
+		cpc_track_pages.retinst += cachepc_retinst;
 
 	if (!cachepc_singlestep)
 		CPC_DBG("post vcpu_run\n");
-
-	/* invalidate cached vmsa so rip is updated */
-	if (cachepc_singlestep)
-		wbinvd();
 
 	put_cpu();
 

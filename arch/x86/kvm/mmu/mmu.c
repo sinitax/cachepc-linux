@@ -3930,8 +3930,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		KVM_PAGE_TRACK_ACCESS,
 		KVM_PAGE_TRACK_WRITE
 	};
-	struct cpc_fault *tmp, *alloc;
-	struct cpc_track_exec *exec;
+	struct cpc_fault *tmp, *alloc, *next;
 	size_t count, i;
 	bool inst_fetch;
 
@@ -3966,9 +3965,8 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		cachepc_send_track_step_event_single(
 			fault->gfn, fault->error_code, cachepc_retinst);
 
-		break;
-	case CPC_TRACK_STEPS:
-	case CPC_TRACK_STEPS_SIGNALLED:
+		return true;
+	case CPC_TRACK_STEPS_AND_FAULTS:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
 
 		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
@@ -3984,31 +3982,100 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		cachepc_singlestep_reset = true;
 
-		return false; /* setup untracked page */
+		return false; /* handle this fault */
 	case CPC_TRACK_PAGES:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
 		if (!inst_fetch || !fault->present) return false;
 
-		exec = &cachepc_track_exec;
 		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
 			fault->gfn, fault->error_code);
 
-		if (!exec->cur_avail) {
+		if (!cpc_track_pages.cur_avail) {
 			cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
-			exec->cur_gfn = fault->gfn;
-			exec->cur_avail = true;
-			exec->retinst = 0;
+			cpc_track_pages.cur_gfn = fault->gfn;
+			cpc_track_pages.cur_avail = true;
+			cpc_track_pages.retinst = 0;
 		} else {
 			cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
-			cachepc_track_single(vcpu, exec->cur_gfn, modes[i]);
-			cachepc_send_track_page_event(exec->cur_gfn,
-				fault->gfn, exec->retinst);
-			exec->retinst = 0;
-			exec->cur_gfn = fault->gfn;
+			cachepc_track_single(vcpu,
+				cpc_track_pages.cur_gfn, modes[i]);
+			cachepc_send_track_page_event(cpc_track_pages.cur_gfn,
+				fault->gfn, cpc_track_pages.retinst);
+			cpc_track_pages.retinst = 0;
+			cpc_track_pages.cur_gfn = fault->gfn;
 		}
 
-		break;
+		return false;
+	case CPC_TRACK_PAGES_RESOLVE:
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
+
+		if (!inst_fetch || !fault->present) return false;
+
+		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
+			fault->gfn, fault->error_code);
+
+		(void) next;
+		// if (cpc_track_pages.retinst > 2 && cpc_track_pages.step) {
+		// 	list_for_each_entry_safe(tmp, next, &cachepc_faults, list) {
+		// 		cachepc_track_single(vcpu, tmp->gfn, KVM_PAGE_TRACK_EXEC);
+		// 		list_del(&tmp->list);
+		// 		kfree(tmp);
+		// 	}
+		// 	cpc_track_pages.step = false;
+		// 	cachepc_singlestep = false;
+		// }
+
+		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+
+		if (!cpc_track_pages.step) {
+			if (cpc_track_pages.cur_avail) {
+				cachepc_track_single(vcpu,
+					cpc_track_pages.cur_gfn, modes[i]);
+				//cachepc_send_track_page_event(cpc_track_pages.cur_gfn,
+				//	fault->gfn, cpc_track_pages.retinst);
+			}
+
+			cpc_track_pages.cur_gfn = fault->gfn;
+			cpc_track_pages.cur_avail = true;
+			cpc_track_pages.retinst = 0;
+			cpc_track_pages.step = true;
+		} else {
+			/* not the main inst page but needed for reasons.. */
+			alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
+			BUG_ON(!alloc);
+			alloc->gfn = fault->gfn;
+			alloc->err = fault->error_code;
+			list_add_tail(&alloc->list, &cachepc_faults);
+
+			/* single step and retrack to resolve */
+			cachepc_singlestep_reset = true;
+		}
+
+		return false;
+	case CPC_TRACK_STEPS_SIGNALLED:
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
+
+		if (!inst_fetch || !fault->present) return false;
+
+		if (cpc_track_steps_signalled.enabled) {
+			CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
+				fault->gfn, fault->error_code);
+
+			if (!cpc_track_steps_signalled.target_avail) {
+				cpc_track_steps_signalled.target_gfn = fault->gfn;
+				cpc_track_steps_signalled.target_avail = true;
+				cachepc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+			} else {
+				cachepc_untrack_single(vcpu, fault->gfn,
+					KVM_PAGE_TRACK_EXEC);
+			}
+
+			cachepc_singlestep_reset = true;
+			cachepc_prime_probe = true;
+		}
+
+		return false; /* handle this fault */
 	}
 
 	return true;

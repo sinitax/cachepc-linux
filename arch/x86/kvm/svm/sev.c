@@ -2419,8 +2419,6 @@ cpc_read_rip(struct kvm *kvm, uint64_t *rip)
 
 		kfree(vmsa);
 
-		CPC_WARN("SEV MEM_ENC %i\n", ret);
-
 		if (ret) return ret;
 	} else {
 		*rip = kvm_rip_read(vcpu);
