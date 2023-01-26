@@ -84,7 +84,12 @@
 	divq %rbx
 	mov %rax, %rdi
 	call cachepc_apic_oneshot_run
+
 skip_apic_\name:
+	movb cachepc_prime_probe, %al
+	mov %rax, %r15
+	cmp $0, %al
+	je skip_prime_\name
 
 	wbinvd
 
@@ -93,6 +98,7 @@ skip_apic_\name:
 	prime 1_\name %r9 %r10 %r8
 	prime 2_\name %r9 %r10 %r8
 
+skip_prime_\name:
 	apply_regs save_tmp
 	apply_regs load_vm
 .endm
@@ -101,8 +107,13 @@ skip_apic_\name:
 	apply_regs save_vm
 	apply_regs load_tmp
 
+	mov %r15, %rax
+	cmp $0, %al
+	je skip_probe_\name
+
 	probe \name %r8 %r9 %r10 %r11 %r12
 
+skip_probe_\name:
 	apply_regs save_tmp
 	apply_regs load_vm
 .endm

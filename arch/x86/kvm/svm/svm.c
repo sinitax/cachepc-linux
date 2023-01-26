@@ -2175,20 +2175,24 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		count += 1;
 	CPC_INFO("Caught single step with %lu faults!\n", count);
 
-	if (cachepc_track_mode == CPC_TRACK_EXEC) {
+	switch (cachepc_track_mode) {
+	case CPC_TRACK_PAGES:
 		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
 			cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
 			list_del(&fault->list);
 			kfree(fault);
 		}
 		cachepc_singlestep = false;
-	} else if (cachepc_track_mode == CPC_TRACK_FULL) {
+		break;
+	case CPC_TRACK_STEPS:
+	case CPC_TRACK_STEPS_SIGNALLED:
 		list_for_each_entry(fault, &cachepc_faults, list) {
 			cachepc_track_single(vcpu, fault->gfn,
 				KVM_PAGE_TRACK_ACCESS);
 		}
 
 		cachepc_send_track_step_event(&cachepc_faults);
+		break;
 	}
 
 	cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
@@ -3934,7 +3938,11 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	cachepc_retinst = 0;
 	if (cachepc_singlestep_reset) {
-		cachepc_apic_timer = 100 * CPC_APIC_TIMER_SOFTDIV;
+		if (cachepc_apic_timer) {
+			cachepc_apic_timer -= 50 * CPC_APIC_TIMER_SOFTDIV;
+		} else {
+			cachepc_apic_timer = 100 * CPC_APIC_TIMER_SOFTDIV;
+		}
 		cachepc_rip_prev_set = false;
 		cachepc_singlestep = true;
 		cachepc_singlestep_reset = false;
@@ -3972,11 +3980,12 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	cachepc_retinst = cachepc_read_pmc(CPC_RETINST_PMC) - cachepc_retinst;
 
-	cachepc_save_msrmts(cachepc_ds);
+	if (cachepc_prime_probe)
+		cachepc_save_msrmts(cachepc_ds);
 
 	cachepc_apic_oneshot = false;
 
-	if (cachepc_track_mode == CPC_TRACK_EXEC)
+	if (cachepc_track_mode == CPC_TRACK_PAGES)
 		cachepc_track_exec.retinst += cachepc_retinst;
 
 	if (!cachepc_singlestep)

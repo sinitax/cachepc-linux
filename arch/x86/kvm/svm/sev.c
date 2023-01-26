@@ -2259,24 +2259,24 @@ retry:
 		pr_err("rmpupdate for pfn %llx succeeded after %d retries\n", pfn, retries);
 	}
 
-        return ret;
+	return ret;
 }
 
 int rmp_make_private_noremap(u64 pfn, u64 gpa, enum pg_level level, int asid, bool immutable)
 {
-        struct rmpupdate val;
+	struct rmpupdate val;
 
-        if (!pfn_valid(pfn))
-                return -EINVAL;
+	if (!pfn_valid(pfn))
+		return -EINVAL;
 
-        memset(&val, 0, sizeof(val));
-        val.assigned = 1;
-        val.asid = asid;
-        val.immutable = immutable;
-        val.gpa = gpa;
-        val.pagesize = X86_TO_RMP_PG_LEVEL(level);
+	memset(&val, 0, sizeof(val));
+	val.assigned = 1;
+	val.asid = asid;
+	val.immutable = immutable;
+	val.gpa = gpa;
+	val.pagesize = X86_TO_RMP_PG_LEVEL(level);
 
-        return rmpupdate_noremap(pfn, &val);
+	return rmpupdate_noremap(pfn, &val);
 }
 
 static int snp_launch_update_vmsa(struct kvm *kvm, struct kvm_sev_cmd *argp)
@@ -2379,6 +2379,78 @@ e_free:
 	return ret;
 }
 
+uint64_t
+cpc_read_rip(struct kvm *kvm, uint64_t *rip)
+{
+	struct kvm_sev_info *sev;
+	struct vcpu_svm *svm;
+	struct kvm_vcpu *vcpu;
+	hpa_t src_pa, dst_pa;
+	void *vmsa;
+	int error;
+	int ret;
+
+	if (xa_empty(&kvm->vcpu_array))
+		return -EFAULT;
+
+	vcpu = xa_load(&kvm->vcpu_array, 0);
+
+	if (sev_es_guest(kvm)) {
+		sev = &to_kvm_svm(kvm)->sev_info;
+		svm = to_svm(vcpu);
+
+		vmsa = kmalloc(PAGE_SIZE, GFP_KERNEL);
+		if (!vmsa) return -ENOMEM;
+		memset(vmsa, 0, PAGE_SIZE);
+
+		src_pa = __pa(svm->sev_es.vmsa);
+		dst_pa = __pa(vmsa);
+		if (sev->snp_active) {
+			ret = snp_guest_dbg_decrypt_page(
+				__pa(sev->snp_context) >> PAGE_SHIFT,
+				src_pa >> PAGE_SHIFT, dst_pa >> PAGE_SHIFT,
+				&error);
+		} else {
+			ret = __sev_dbg_decrypt(kvm, src_pa, dst_pa,
+				PAGE_SIZE, &error);
+		}
+
+		*rip = *(uint64_t *)(vmsa + 0x178);
+
+		kfree(vmsa);
+
+		CPC_WARN("SEV MEM_ENC %i\n", ret);
+
+		if (ret) return ret;
+	} else {
+		*rip = kvm_rip_read(vcpu);
+	}
+
+	return 0;
+}
+
+static int
+sev_cachepc_ioctl(struct kvm *kvm, struct kvm_sev_cmd *sev_cmd)
+{
+	struct cpc_sev_cmd cmd;
+	int ret;
+
+	if (copy_from_user(&cmd, (void *)sev_cmd->data, sizeof(cmd)))
+		return -EFAULT;
+
+	if (cmd.id == SEV_CPC_GET_RIP) {
+		ret = cpc_read_rip(kvm, &cmd.data);
+		if (ret) return ret;
+	} else {
+		CPC_ERR("Unknown cachepc sev cmd: %i\n", cmd.id);
+	}
+
+	if (copy_to_user((void *)sev_cmd->data, &cmd, sizeof(cmd)))
+		return -EFAULT;
+
+	return 0;
+}
+
 int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
 {
 	struct kvm_sev_cmd sev_cmd;
@@ -2396,11 +2468,12 @@ int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
 	mutex_lock(&kvm->lock);
 
 	/* Only the enc_context_owner handles some memory enc operations. */
-	if (is_mirroring_enc_context(kvm) &&
-	    !is_cmd_allowed_from_mirror(sev_cmd.id)) {
-		r = -EINVAL;
-		goto out;
-	}
+	(void) is_cmd_allowed_from_mirror;
+	// if (is_mirroring_enc_context(kvm) &&
+	//     !is_cmd_allowed_from_mirror(sev_cmd.id)) {
+	// 	r = -EINVAL;
+	// 	goto out;
+	// }
 
 	switch (sev_cmd.id) {
 	case KVM_SEV_SNP_INIT:
@@ -2480,6 +2553,9 @@ int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
 		break;
 	case KVM_SEV_SNP_LAUNCH_FINISH:
 		r = snp_launch_finish(kvm, &sev_cmd);
+		break;
+	case KVM_SEV_CACHEPC:
+		r = sev_cachepc_ioctl(kvm, &sev_cmd);
 		break;
 	default:
 		r = -EINVAL;
