@@ -3930,11 +3930,9 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		KVM_PAGE_TRACK_ACCESS,
 		KVM_PAGE_TRACK_WRITE
 	};
-	struct cpc_fault *tmp, *alloc, *next;
+	struct cpc_fault *tmp, *alloc;
 	size_t count, i;
 	bool inst_fetch;
-
-	/* returns true if the page fault should not be handled */
 
 	for (i = 0; i < 3; i++) {
 		if (kvm_slot_page_track_is_active(vcpu->kvm,
@@ -3942,17 +3940,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			break;
 	}
 	if (i == 3) {
-		CPC_DBG("Untracked page fault (gfn:%llu err:%u)\n",
+		CPC_DBG("Untracked page fault (gfn:%08llx err:%u)\n",
 			fault->gfn, fault->error_code);
 		return false;
 	}
 
-	CPC_DBG("Tracked page fault (gfn:%llu err:%u)\n",
-		fault->gfn, fault->error_code);
-
 	inst_fetch = fault->error_code & PFERR_FETCH_MASK;
-	CPC_DBG("Tracked page fault attrs p:%i w:%i x:%i f:%i\n",
-		fault->present, fault->write, fault->exec, inst_fetch);
 
 	count = 0;
 	list_for_each_entry(tmp, &cachepc_faults, list)
@@ -3966,10 +3959,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			fault->gfn, fault->error_code, cachepc_retinst);
 
 		return true;
-	case CPC_TRACK_STEPS_AND_FAULTS:
-		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
+	case CPC_TRACK_STEPS:
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
-		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
+		if (!inst_fetch || !fault->present) return false;
+
+		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
 		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
@@ -3982,13 +3977,30 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		cachepc_singlestep_reset = true;
 
-		return false; /* handle this fault */
+		break;
+	case CPC_TRACK_STEPS_AND_FAULTS:
+		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
+
+		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
+			fault->gfn, fault->error_code);
+
+		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+
+		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
+		BUG_ON(!alloc);
+		alloc->gfn = fault->gfn;
+		alloc->err = fault->error_code;
+		list_add_tail(&alloc->list, &cachepc_faults);
+
+		cachepc_singlestep_reset = true;
+
+		break;
 	case CPC_TRACK_PAGES:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
 		if (!inst_fetch || !fault->present) return false;
 
-		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
+		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
 		if (!cpc_track_pages.cur_avail) {
@@ -4006,25 +4018,19 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cpc_track_pages.cur_gfn = fault->gfn;
 		}
 
-		return false;
+		break;
 	case CPC_TRACK_PAGES_RESOLVE:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
 		if (!inst_fetch || !fault->present) return false;
 
-		CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
+		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
-		(void) next;
-		// if (cpc_track_pages.retinst > 2 && cpc_track_pages.step) {
-		// 	list_for_each_entry_safe(tmp, next, &cachepc_faults, list) {
-		// 		cachepc_track_single(vcpu, tmp->gfn, KVM_PAGE_TRACK_EXEC);
-		// 		list_del(&tmp->list);
-		// 		kfree(tmp);
-		// 	}
-		// 	cpc_track_pages.step = false;
-		// 	cachepc_singlestep = false;
-		// }
+		/* no conflict if next pagefault happens on a different inst */
+		if (cpc_track_pages.step && !cachepc_singlestep
+				&& cpc_track_pages.retinst > 2)
+			cpc_track_pages.step = false;
 
 		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
 
@@ -4052,14 +4058,14 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cachepc_singlestep_reset = true;
 		}
 
-		return false;
+		break;
 	case CPC_TRACK_STEPS_SIGNALLED:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
 		if (!inst_fetch || !fault->present) return false;
 
 		if (cpc_track_steps_signalled.enabled) {
-			CPC_INFO("Got fault cnt:%lu gfn:%llu err:%u\n", count,
+			CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 				fault->gfn, fault->error_code);
 
 			if (!cpc_track_steps_signalled.target_avail) {
@@ -4075,10 +4081,15 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cachepc_prime_probe = true;
 		}
 
-		return false; /* handle this fault */
+		break;
 	}
 
-	return true;
+	if (cachepc_singlestep_reset)
+		cachepc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
+	if (cachepc_apic_timer < CPC_APIC_TIMER_MIN)
+		cachepc_apic_timer = CPC_APIC_TIMER_MIN;
+
+	return false;
 }
 
 static void shadow_page_table_clear_flood(struct kvm_vcpu *vcpu, gva_t addr)

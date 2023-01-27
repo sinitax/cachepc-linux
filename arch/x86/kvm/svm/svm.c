@@ -2114,6 +2114,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 	struct vmcb_control_area *control;
 	struct vcpu_svm *svm;
 	struct cpc_fault *fault, *next;
+	bool inst_gfn_seen;
 	size_t count;
 
 	++vcpu->stat.irq_exits;
@@ -2190,13 +2191,29 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 			kfree(fault);
 		}
 		break;
+	case CPC_TRACK_STEPS:
+		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
+			cachepc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
+			list_del(&fault->list);
+			kfree(fault);
+		}
+		cachepc_singlestep_reset = true;
+		break;
 	case CPC_TRACK_STEPS_AND_FAULTS:
-		list_for_each_entry(fault, &cachepc_faults, list) {
-			cachepc_track_single(vcpu, fault->gfn,
-				KVM_PAGE_TRACK_ACCESS);
+		inst_gfn_seen = false;
+		list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
+			if (!inst_gfn_seen && (fault->err & PFERR_FETCH_MASK))
+				inst_gfn_seen = true;
+			if (!inst_gfn_seen) {
+				list_del(&fault->list);
+				kfree(fault);
+			} else {
+				cachepc_track_single(vcpu, fault->gfn,
+					KVM_PAGE_TRACK_ACCESS);
+			}
 		}
 		cachepc_send_track_step_event(&cachepc_faults);
-		cachepc_singlestep = true;
+		cachepc_singlestep_reset = true;
 		break;
 	case CPC_TRACK_STEPS_SIGNALLED:
 		if (cpc_track_steps_signalled.enabled
@@ -2212,6 +2229,11 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		}
 		break;
 	}
+
+	if (cachepc_singlestep_reset)
+		cachepc_apic_timer -= 30 * CPC_APIC_TIMER_SOFTDIV;
+	if (cachepc_apic_timer < CPC_APIC_TIMER_MIN)
+		cachepc_apic_timer = CPC_APIC_TIMER_MIN;
 
 	list_for_each_entry_safe(fault, next, &cachepc_faults, list) {
 		list_del(&fault->list);
@@ -3953,11 +3975,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	memset(cachepc_msrmts, 0, L1_SETS);
 
 	if (cachepc_singlestep_reset) {
-		if (cachepc_apic_timer >= 150 * CPC_APIC_TIMER_SOFTDIV) {
-			cachepc_apic_timer -= 30 * CPC_APIC_TIMER_SOFTDIV;
-		} else {
-			cachepc_apic_timer = 100 * CPC_APIC_TIMER_SOFTDIV;
-		}
+		if (cachepc_apic_timer < CPC_APIC_TIMER_MIN)
+			cachepc_apic_timer = CPC_APIC_TIMER_MIN;
 		cachepc_rip_prev_set = false;
 		cachepc_singlestep = true;
 		cachepc_singlestep_reset = false;
