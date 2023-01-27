@@ -1158,7 +1158,7 @@ static void drop_large_spte(struct kvm_vcpu *vcpu, u64 *sptep)
 }
 
 bool
-cachepc_spte_protect(u64 *sptep, bool pt_protect, enum kvm_page_track_mode mode)
+cpc_spte_protect(u64 *sptep, bool pt_protect, enum kvm_page_track_mode mode)
 {
 	u64 spte;
 
@@ -1169,14 +1169,14 @@ cachepc_spte_protect(u64 *sptep, bool pt_protect, enum kvm_page_track_mode mode)
 	if (pt_protect)
 		spte &= ~shadow_mmu_writable_mask;
 
-	spte = cachepc_protect_pte(spte, mode);
+	spte = cpc_protect_pte(spte, mode);
 
 	mmu_spte_update(sptep, spte);
 
 	return true;
 }
 
-bool cachepc_rmap_protect(struct kvm_rmap_head *rmap_head,
+bool cpc_rmap_protect(struct kvm_rmap_head *rmap_head,
 	bool pt_protect, enum kvm_page_track_mode mode)
 {
 	struct rmap_iterator iter;
@@ -1185,7 +1185,7 @@ bool cachepc_rmap_protect(struct kvm_rmap_head *rmap_head,
 
 	flush = false;
 	for_each_rmap_spte(rmap_head, &iter, sptep) {
-		flush |= cachepc_spte_protect(sptep, pt_protect, mode);
+		flush |= cpc_spte_protect(sptep, pt_protect, mode);
 	}
 
 	return flush;
@@ -1206,7 +1206,7 @@ bool cachepc_rmap_protect(struct kvm_rmap_head *rmap_head,
  static bool rmap_write_protect(struct kvm_rmap_head *rmap_head,
 			       bool pt_protect)
 {
-	return cachepc_rmap_protect(rmap_head, pt_protect, KVM_PAGE_TRACK_WRITE);
+	return cpc_rmap_protect(rmap_head, pt_protect, KVM_PAGE_TRACK_WRITE);
 }
 
 static bool spte_clear_dirty(u64 *sptep)
@@ -1369,7 +1369,7 @@ int kvm_cpu_dirty_log_size(void)
 }
 
 bool
-cachepc_kvm_mmu_slot_gfn_protect(struct kvm *kvm, struct kvm_memory_slot *slot,
+cpc_kvm_mmu_slot_gfn_protect(struct kvm *kvm, struct kvm_memory_slot *slot,
 	uint64_t gfn, int min_level, enum kvm_page_track_mode mode)
 {
 	struct kvm_rmap_head *rmap_head;
@@ -1381,10 +1381,10 @@ cachepc_kvm_mmu_slot_gfn_protect(struct kvm *kvm, struct kvm_memory_slot *slot,
 	if (kvm_memslots_have_rmaps(kvm)) {
 		for (i = min_level; i <= KVM_MAX_HUGEPAGE_LEVEL; ++i) {
 			rmap_head = gfn_to_rmap(gfn, i, slot);
-			flush |= cachepc_rmap_protect(rmap_head, true, mode);
+			flush |= cpc_rmap_protect(rmap_head, true, mode);
 		}
 	} else if (is_tdp_mmu_enabled(kvm)) {
-		flush |= cachepc_tdp_protect_gfn(kvm, slot, gfn, min_level, mode);
+		flush |= cpc_tdp_protect_gfn(kvm, slot, gfn, min_level, mode);
 	} else {
 		CPC_ERR("Tracking unsupported!\n");
 	}
@@ -1396,7 +1396,7 @@ bool kvm_mmu_slot_gfn_write_protect(struct kvm *kvm,
 				    struct kvm_memory_slot *slot, u64 gfn,
 				    int min_level)
 {
-	return cachepc_kvm_mmu_slot_gfn_protect(kvm, slot,
+	return cpc_kvm_mmu_slot_gfn_protect(kvm, slot,
 		gfn, min_level, KVM_PAGE_TRACK_WRITE);
 }
 
@@ -3948,15 +3948,15 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	inst_fetch = fault->error_code & PFERR_FETCH_MASK;
 
 	count = 0;
-	list_for_each_entry(tmp, &cachepc_faults, list)
+	list_for_each_entry(tmp, &cpc_faults, list)
 		count += 1;
 
-	switch (cachepc_track_mode) {
+	switch (cpc_track_mode) {
 	case CPC_TRACK_FAULT_NO_RUN:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
 
-		cachepc_send_track_step_event_single(
-			fault->gfn, fault->error_code, cachepc_retinst);
+		cpc_send_track_step_event_single(
+			fault->gfn, fault->error_code, cpc_retinst);
 
 		return true;
 	case CPC_TRACK_STEPS:
@@ -3967,15 +3967,15 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
-		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
 		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
 		BUG_ON(!alloc);
 		alloc->gfn = fault->gfn;
 		alloc->err = fault->error_code;
-		list_add_tail(&alloc->list, &cachepc_faults);
+		list_add_tail(&alloc->list, &cpc_faults);
 
-		cachepc_singlestep_reset = true;
+		cpc_singlestep_reset = true;
 
 		break;
 	case CPC_TRACK_STEPS_AND_FAULTS:
@@ -3984,15 +3984,15 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
-		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
 		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
 		BUG_ON(!alloc);
 		alloc->gfn = fault->gfn;
 		alloc->err = fault->error_code;
-		list_add_tail(&alloc->list, &cachepc_faults);
+		list_add_tail(&alloc->list, &cpc_faults);
 
-		cachepc_singlestep_reset = true;
+		cpc_singlestep_reset = true;
 
 		break;
 	case CPC_TRACK_PAGES:
@@ -4004,15 +4004,15 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			fault->gfn, fault->error_code);
 
 		if (!cpc_track_pages.cur_avail) {
-			cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+			cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 			cpc_track_pages.cur_gfn = fault->gfn;
 			cpc_track_pages.cur_avail = true;
 			cpc_track_pages.retinst = 0;
 		} else {
-			cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
-			cachepc_track_single(vcpu,
+			cpc_untrack_single(vcpu, fault->gfn, modes[i]);
+			cpc_track_single(vcpu,
 				cpc_track_pages.cur_gfn, modes[i]);
-			cachepc_send_track_page_event(cpc_track_pages.cur_gfn,
+			cpc_send_track_page_event(cpc_track_pages.cur_gfn,
 				fault->gfn, cpc_track_pages.retinst);
 			cpc_track_pages.retinst = 0;
 			cpc_track_pages.cur_gfn = fault->gfn;
@@ -4028,17 +4028,17 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			fault->gfn, fault->error_code);
 
 		/* no conflict if next pagefault happens on a different inst */
-		if (cpc_track_pages.step && !cachepc_singlestep
+		if (cpc_track_pages.step && !cpc_singlestep
 				&& cpc_track_pages.retinst > 2)
 			cpc_track_pages.step = false;
 
-		cachepc_untrack_single(vcpu, fault->gfn, modes[i]);
+		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
 		if (!cpc_track_pages.step) {
 			if (cpc_track_pages.cur_avail) {
-				cachepc_track_single(vcpu,
+				cpc_track_single(vcpu,
 					cpc_track_pages.cur_gfn, modes[i]);
-				//cachepc_send_track_page_event(cpc_track_pages.cur_gfn,
+				//cpc_send_track_page_event(cpc_track_pages.cur_gfn,
 				//	fault->gfn, cpc_track_pages.retinst);
 			}
 
@@ -4052,10 +4052,10 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			BUG_ON(!alloc);
 			alloc->gfn = fault->gfn;
 			alloc->err = fault->error_code;
-			list_add_tail(&alloc->list, &cachepc_faults);
+			list_add_tail(&alloc->list, &cpc_faults);
 
 			/* single step and retrack to resolve */
-			cachepc_singlestep_reset = true;
+			cpc_singlestep_reset = true;
 		}
 
 		break;
@@ -4071,23 +4071,23 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			if (!cpc_track_steps_signalled.target_avail) {
 				cpc_track_steps_signalled.target_gfn = fault->gfn;
 				cpc_track_steps_signalled.target_avail = true;
-				cachepc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
 			} else {
-				cachepc_untrack_single(vcpu, fault->gfn,
+				cpc_untrack_single(vcpu, fault->gfn,
 					KVM_PAGE_TRACK_EXEC);
 			}
 
-			cachepc_singlestep_reset = true;
-			cachepc_prime_probe = true;
+			cpc_singlestep_reset = true;
+			cpc_prime_probe = true;
 		}
 
 		break;
 	}
 
-	if (cachepc_singlestep_reset)
-		cachepc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
-	if (cachepc_apic_timer < CPC_APIC_TIMER_MIN)
-		cachepc_apic_timer = CPC_APIC_TIMER_MIN;
+	if (cpc_singlestep_reset)
+		cpc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
+	if (cpc_apic_timer < CPC_APIC_TIMER_MIN)
+		cpc_apic_timer = CPC_APIC_TIMER_MIN;
 
 	return false;
 }

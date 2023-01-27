@@ -9332,21 +9332,21 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	}
 	case KVM_HC_CPC_VMMCALL_SIGNAL:
 		CPC_DBG("SIGNAL VMMCALL %lu:%lu\n", a0, a1);
-		if (cachepc_track_mode == CPC_TRACK_STEPS_SIGNALLED) {
+		if (cpc_track_mode == CPC_TRACK_STEPS_SIGNALLED) {
 			if (a0 == CPC_GUEST_START_TRACK) {
 				cpc_track_steps_signalled.enabled = true;
 				cpc_track_steps_signalled.target_avail = false;
-				cachepc_singlestep = false;
-				cachepc_prime_probe = false;
-				cachepc_track_all(vcpu, KVM_PAGE_TRACK_EXEC);
+				cpc_singlestep = false;
+				cpc_prime_probe = false;
+				cpc_track_all(vcpu, KVM_PAGE_TRACK_EXEC);
 			} else if (a0 == CPC_GUEST_STOP_TRACK) {
 				cpc_track_steps_signalled.enabled = false;
-				cachepc_singlestep = false;
-				cachepc_prime_probe = false;
-				cachepc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+				cpc_singlestep = false;
+				cpc_prime_probe = false;
+				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
 			}
 		}
-		cachepc_send_guest_event(a0, a1);
+		cpc_send_guest_event(a0, a1);
 		ret = 0;
 		break;
 	case KVM_HC_CPC_VMMCALL_EXIT:
@@ -9539,7 +9539,7 @@ static int inject_pending_event(struct kvm_vcpu *vcpu, bool *req_immediate_exit)
 	}
 
 	/* Don't inject interrupts if the user asked to avoid doing so */
-	if (cachepc_singlestep || (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ))
+	if (cpc_singlestep || (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ))
 		return 0;
 
 	/*

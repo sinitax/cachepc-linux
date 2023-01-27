@@ -31,24 +31,24 @@
 
 #include "../cachepc/macro.S"
 
-.extern cachepc_msrmts
-.extern cachepc_regs_tmp
-.extern cachepc_regs_vm
+.extern cpc_msrmts
+.extern cpc_regs_tmp
+.extern cpc_regs_vm
 
 .macro load_tmp off reg
-	mov cachepc_regs_tmp+\off, \reg
+	mov cpc_regs_tmp+\off, \reg
 .endm
 
 .macro save_tmp off reg
-	mov \reg, cachepc_regs_tmp+\off
+	mov \reg, cpc_regs_tmp+\off
 .endm
 
 .macro load_vm off reg
-	mov cachepc_regs_vm+\off, \reg
+	mov cpc_regs_vm+\off, \reg
 .endm
 
 .macro save_vm off reg
-	mov \reg, cachepc_regs_vm+\off
+	mov \reg, cpc_regs_vm+\off
 .endm
 
 .macro apply_regs func
@@ -74,26 +74,26 @@
 	apply_regs save_vm
 	apply_regs load_tmp
 
-	movb cachepc_apic_oneshot, %al
+	movb cpc_apic_oneshot, %al
 	cmp $0, %al
 	je skip_apic_\name
 
 	mov $0, %rdx
-	mov cachepc_apic_timer, %eax
+	mov cpc_apic_timer, %eax
 	mov $CPC_APIC_TIMER_SOFTDIV, %rbx
 	divq %rbx
 	mov %rax, %rdi
-	call cachepc_apic_oneshot_run
+	call cpc_apic_oneshot_run
 
 skip_apic_\name:
-	movb cachepc_prime_probe, %al
+	movb cpc_prime_probe, %al
 	mov %rax, %r15
 	cmp $0, %al
 	je skip_prime_\name
 
 	wbinvd
 
-	mov cachepc_ds, %r9
+	mov cpc_ds, %r9
 	prime \name %r9 %r10 %r8
 	prime 1_\name %r9 %r10 %r8
 	prime 2_\name %r9 %r10 %r8

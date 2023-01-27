@@ -133,7 +133,7 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 	 */
 	kvm_mmu_gfn_disallow_lpage(slot, gfn);
 
-	if (cachepc_kvm_mmu_slot_gfn_protect(kvm,
+	if (cpc_kvm_mmu_slot_gfn_protect(kvm,
 			slot, gfn, PG_LEVEL_4K, mode)) {
 		kvm_flush_remote_tlbs(kvm);
 	}

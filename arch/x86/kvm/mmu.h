@@ -52,7 +52,7 @@ extern bool __read_mostly enable_mmio_caching;
 #define KVM_MMU_CR0_ROLE_BITS (X86_CR0_PG | X86_CR0_WP)
 #define KVM_MMU_EFER_ROLE_BITS (EFER_LME | EFER_NX)
 
-static inline u64 cachepc_protect_pte(u64 pte, enum kvm_page_track_mode mode)
+static inline u64 cpc_protect_pte(u64 pte, enum kvm_page_track_mode mode)
 {
 	if (mode == KVM_PAGE_TRACK_WRITE) {
 		pte &= ~PT_WRITABLE_MASK;

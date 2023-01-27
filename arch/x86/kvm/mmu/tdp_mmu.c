@@ -1088,7 +1088,7 @@ static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
 	for (i = 0; i < 2; i++) {
 		if (kvm_slot_page_track_is_active(vcpu->kvm,
 				fault->slot, fault->gfn, modes[i])) {
-			new_spte = cachepc_protect_pte(new_spte, modes[i]);
+			new_spte = cpc_protect_pte(new_spte, modes[i]);
 			break;
 		}
 	}
@@ -1824,7 +1824,7 @@ void kvm_tdp_mmu_zap_collapsible_sptes(struct kvm *kvm,
 		zap_collapsible_spte_range(kvm, root, slot);
 }
 
-static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
+static bool cpc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 	gfn_t gfn, int min_level, int mode)
 {
 	struct tdp_iter iter;
@@ -1841,7 +1841,7 @@ static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 			continue;
 
 		new_spte = iter.old_spte & ~shadow_mmu_writable_mask;
-		new_spte = cachepc_protect_pte(new_spte, mode);
+		new_spte = cpc_protect_pte(new_spte, mode);
 
 		if (new_spte == iter.old_spte)
 			break;
@@ -1855,7 +1855,7 @@ static bool cachepc_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 	return spte_set;
 }
 
-bool cachepc_tdp_protect_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
+bool cpc_tdp_protect_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 	gfn_t gfn, int min_level, enum kvm_page_track_mode mode)
 {
 	struct kvm_mmu_page *root;
@@ -1863,7 +1863,7 @@ bool cachepc_tdp_protect_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 	lockdep_assert_held_write(&kvm->mmu_lock);
 	for_each_tdp_mmu_root(kvm, root, slot->as_id)
-		spte_set |= cachepc_protect_gfn(kvm, root, gfn, min_level, mode);
+		spte_set |= cpc_protect_gfn(kvm, root, gfn, min_level, mode);
 
 	return spte_set;
 }
@@ -1877,7 +1877,7 @@ bool kvm_tdp_mmu_write_protect_gfn(struct kvm *kvm,
 				   struct kvm_memory_slot *slot, gfn_t gfn,
 				   int min_level)
 {
-	return cachepc_tdp_protect_gfn(kvm, slot, gfn, min_level,
+	return cpc_tdp_protect_gfn(kvm, slot, gfn, min_level,
 		KVM_PAGE_TRACK_WRITE);
 }
 

@@ -4874,7 +4874,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		r = -EOPNOTSUPP;
 		break;
 	default:
-		return cachepc_kvm_ioctl(filp, ioctl, arg);
+		return cpc_kvm_ioctl(filp, ioctl, arg);
 	}
 out:
 	return r;
@@ -5802,7 +5802,7 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 	r = kvm_vfio_ops_init();
 	WARN_ON(r);
 
-	cachepc_kvm_init();
+	cpc_kvm_init();
 
 	return 0;
 
@@ -5833,7 +5833,7 @@ void kvm_exit(void)
 {
 	int cpu;
 
-	cachepc_kvm_exit();
+	cpc_kvm_exit();
 
 	debugfs_remove_recursive(kvm_debugfs_dir);
 	misc_deregister(&kvm_dev);
