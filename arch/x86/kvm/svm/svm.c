@@ -2180,11 +2180,9 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 	CPC_INFO("Caught single step with %lu faults!\n", count);
 
 	switch (cpc_track_mode) {
-	case CPC_TRACK_PAGES_RESOLVE:
-		cpc_track_pages.step = false;
-		cpc_singlestep = false;
-		fallthrough;
 	case CPC_TRACK_PAGES:
+		cpc_singlestep = false;
+		cpc_track_pages.in_step = false;
 		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
 			cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
 			list_del(&fault->list);
@@ -2229,11 +2227,6 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		}
 		break;
 	}
-
-	if (cpc_singlestep_reset)
-		cpc_apic_timer -= 30 * CPC_APIC_TIMER_SOFTDIV;
-	if (cpc_apic_timer < CPC_APIC_TIMER_MIN)
-		cpc_apic_timer = CPC_APIC_TIMER_MIN;
 
 	list_for_each_entry_safe(fault, next, &cpc_faults, list) {
 		list_del(&fault->list);
@@ -3444,6 +3437,8 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 		}
 	}
 
+	cpc_svm_exitcode = exit_code;
+
 #ifdef CONFIG_RETPOLINE
 	if (exit_code == SVM_EXIT_MSR)
 		return msr_interception(vcpu);
@@ -3975,8 +3970,13 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	memset(cpc_msrmts, 0, L1_SETS);
 
 	if (cpc_singlestep_reset) {
-		if (cpc_apic_timer < CPC_APIC_TIMER_MIN)
+		if (cpc_apic_timer < CPC_APIC_TIMER_MIN) {
 			cpc_apic_timer = CPC_APIC_TIMER_MIN;
+		} else if (cpc_svm_exitcode == SVM_EXIT_NPF) {
+			cpc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
+		} else if (cpc_svm_exitcode == SVM_EXIT_INTR) {
+			cpc_apic_timer -= 30 * CPC_APIC_TIMER_SOFTDIV;
+		}
 		cpc_rip_prev_set = false;
 		cpc_singlestep = true;
 		cpc_singlestep_reset = false;
@@ -4019,8 +4019,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	cpc_apic_oneshot = false;
 
-	if (cpc_track_mode == CPC_TRACK_PAGES
-			|| cpc_track_mode == CPC_TRACK_PAGES_RESOLVE)
+	if (cpc_track_mode == CPC_TRACK_PAGES)
 		cpc_track_pages.retinst += cpc_retinst;
 
 	if (!cpc_singlestep)

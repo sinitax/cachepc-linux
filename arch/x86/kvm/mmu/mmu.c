@@ -4003,49 +4003,25 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
-		if (!cpc_track_pages.cur_avail) {
-			cpc_untrack_single(vcpu, fault->gfn, modes[i]);
-			cpc_track_pages.cur_gfn = fault->gfn;
-			cpc_track_pages.cur_avail = true;
-			cpc_track_pages.retinst = 0;
-		} else {
-			cpc_untrack_single(vcpu, fault->gfn, modes[i]);
-			cpc_track_single(vcpu,
-				cpc_track_pages.cur_gfn, modes[i]);
-			cpc_send_track_page_event(cpc_track_pages.cur_gfn,
-				fault->gfn, cpc_track_pages.retinst);
-			cpc_track_pages.retinst = 0;
-			cpc_track_pages.cur_gfn = fault->gfn;
-		}
-
-		break;
-	case CPC_TRACK_PAGES_RESOLVE:
-		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
-
-		if (!inst_fetch || !fault->present) return false;
-
-		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
-			fault->gfn, fault->error_code);
-
 		/* no conflict if next pagefault happens on a different inst */
-		if (cpc_track_pages.step && !cpc_singlestep
+		if (cpc_track_pages.in_step && !cpc_singlestep
 				&& cpc_track_pages.retinst > 2)
-			cpc_track_pages.step = false;
+			cpc_track_pages.in_step = false;
 
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
-		if (!cpc_track_pages.step) {
+		if (!cpc_track_pages.in_step) {
 			if (cpc_track_pages.cur_avail) {
 				cpc_track_single(vcpu,
 					cpc_track_pages.cur_gfn, modes[i]);
-				//cpc_send_track_page_event(cpc_track_pages.cur_gfn,
-				//	fault->gfn, cpc_track_pages.retinst);
+				cpc_send_track_page_event(cpc_track_pages.cur_gfn,
+					fault->gfn, cpc_track_pages.retinst);
 			}
 
 			cpc_track_pages.cur_gfn = fault->gfn;
 			cpc_track_pages.cur_avail = true;
 			cpc_track_pages.retinst = 0;
-			cpc_track_pages.step = true;
+			cpc_track_pages.in_step = true;
 		} else {
 			/* not the main inst page but needed for reasons.. */
 			alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
@@ -4083,11 +4059,6 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		break;
 	}
-
-	if (cpc_singlestep_reset)
-		cpc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
-	if (cpc_apic_timer < CPC_APIC_TIMER_MIN)
-		cpc_apic_timer = CPC_APIC_TIMER_MIN;
 
 	return false;
 }
