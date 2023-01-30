@@ -3960,39 +3960,41 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		return true;
 	case CPC_TRACK_STEPS:
-		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
-
-		if (!inst_fetch || !fault->present) return false;
-
-		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
-			fault->gfn, fault->error_code);
-
-		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
-
-		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
-		BUG_ON(!alloc);
-		alloc->gfn = fault->gfn;
-		alloc->err = fault->error_code;
-		list_add_tail(&alloc->list, &cpc_faults);
-
-		cpc_singlestep_reset = true;
-
-		break;
-	case CPC_TRACK_STEPS_AND_FAULTS:
-		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
+		if (cpc_track_steps.with_data && cpc_track_steps.stepping)
+			BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
+		else
+			BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
-		alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
-		BUG_ON(!alloc);
-		alloc->gfn = fault->gfn;
-		alloc->err = fault->error_code;
-		list_add_tail(&alloc->list, &cpc_faults);
+		if (!cpc_track_steps.stepping) {
+			if (!inst_fetch || !fault->present) return false;
 
-		cpc_singlestep_reset = true;
+			if (fault->gfn == cpc_track_steps.target_gfn) {
+				cpc_track_steps.stepping = true;
+				if (cpc_track_steps.with_data) {
+					cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+					cpc_track_all(vcpu, KVM_PAGE_TRACK_ACCESS);
+					cpc_untrack_single(vcpu, fault->gfn,
+						KVM_PAGE_TRACK_ACCESS);
+				}
+			}
+		}
+
+		if (cpc_track_steps.stepping) {
+			alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
+			BUG_ON(!alloc);
+			alloc->gfn = fault->gfn;
+			alloc->err = fault->error_code;
+			list_add_tail(&alloc->list, &cpc_faults);
+
+			cpc_singlestep_reset = true;
+			if (cpc_track_steps.with_data)
+				cpc_prime_probe = true;
+		}
 
 		break;
 	case CPC_TRACK_PAGES:
@@ -4035,27 +4037,9 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		}
 
 		break;
-	case CPC_TRACK_STEPS_SIGNALLED:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
 		if (!inst_fetch || !fault->present) return false;
-
-		if (cpc_track_steps_signalled.enabled) {
-			CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
-				fault->gfn, fault->error_code);
-
-			if (!cpc_track_steps_signalled.target_avail) {
-				cpc_track_steps_signalled.target_gfn = fault->gfn;
-				cpc_track_steps_signalled.target_avail = true;
-				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
-			} else {
-				cpc_untrack_single(vcpu, fault->gfn,
-					KVM_PAGE_TRACK_EXEC);
-			}
-
-			cpc_singlestep_reset = true;
-			cpc_prime_probe = true;
-		}
 
 		break;
 	}

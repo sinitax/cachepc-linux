@@ -2114,6 +2114,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 	struct vmcb_control_area *control;
 	struct vcpu_svm *svm;
 	struct cpc_fault *fault, *next;
+	uint64_t inst_gfn;
 	bool inst_gfn_seen;
 	size_t count;
 
@@ -2190,41 +2191,35 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		}
 		break;
 	case CPC_TRACK_STEPS:
+		inst_gfn_seen = false;
 		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
-			cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
+			if (!inst_gfn_seen && (fault->err & PFERR_FETCH_MASK)) {
+				inst_gfn = fault->gfn;
+				inst_gfn_seen = true;
+			}
+			if (!inst_gfn_seen && cpc_track_steps.use_filter) {
+				list_del(&fault->list);
+				kfree(fault);
+			}
+		}
+		WARN_ON(!inst_gfn_seen);
+		if (cpc_track_steps.use_target &&
+				inst_gfn != cpc_track_steps.target_gfn) {
+			cpc_track_steps.stepping = false;
+			cpc_prime_probe = false;
+			cpc_singlestep = false;
+		}
+		if (cpc_track_steps.stepping)
+			cpc_send_track_step_event(&cpc_faults);
+		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
+			if (cpc_track_steps.with_data && cpc_track_steps.stepping)
+				cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
+			else
+				cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
 			list_del(&fault->list);
 			kfree(fault);
 		}
 		cpc_singlestep_reset = true;
-		break;
-	case CPC_TRACK_STEPS_AND_FAULTS:
-		inst_gfn_seen = false;
-		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
-			if (!inst_gfn_seen && (fault->err & PFERR_FETCH_MASK))
-				inst_gfn_seen = true;
-			if (!inst_gfn_seen) {
-				list_del(&fault->list);
-				kfree(fault);
-			} else {
-				cpc_track_single(vcpu, fault->gfn,
-					KVM_PAGE_TRACK_ACCESS);
-			}
-		}
-		cpc_send_track_step_event(&cpc_faults);
-		cpc_singlestep_reset = true;
-		break;
-	case CPC_TRACK_STEPS_SIGNALLED:
-		if (cpc_track_steps_signalled.enabled
-				&& cpc_track_steps_signalled.target_avail) {
-			cpc_send_track_step_event_single(
-				cpc_track_steps_signalled.target_gfn,
-				0, cpc_retinst);
-			cpc_track_single(vcpu,
-				cpc_track_steps_signalled.target_gfn,
-				KVM_PAGE_TRACK_EXEC);
-			cpc_prime_probe = false;
-			cpc_singlestep = false;
-		}
 		break;
 	}
 

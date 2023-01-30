@@ -9332,20 +9332,6 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	}
 	case KVM_HC_CPC_VMMCALL_SIGNAL:
 		CPC_DBG("SIGNAL VMMCALL %lu:%lu\n", a0, a1);
-		if (cpc_track_mode == CPC_TRACK_STEPS_SIGNALLED) {
-			if (a0 == CPC_GUEST_START_TRACK) {
-				cpc_track_steps_signalled.enabled = true;
-				cpc_track_steps_signalled.target_avail = false;
-				cpc_singlestep = false;
-				cpc_prime_probe = false;
-				cpc_track_all(vcpu, KVM_PAGE_TRACK_EXEC);
-			} else if (a0 == CPC_GUEST_STOP_TRACK) {
-				cpc_track_steps_signalled.enabled = false;
-				cpc_singlestep = false;
-				cpc_prime_probe = false;
-				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
-			}
-		}
 		cpc_send_guest_event(a0, a1);
 		ret = 0;
 		break;
