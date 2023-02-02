@@ -2182,13 +2182,26 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	switch (cpc_track_mode) {
 	case CPC_TRACK_PAGES:
-		cpc_singlestep = false;
 		cpc_track_pages.in_step = false;
-		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
-			cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_EXEC);
-			list_del(&fault->list);
-			kfree(fault);
+		cpc_singlestep = false;
+
+		if (cpc_track_pages.cur_avail && cpc_track_pages.next_avail) {
+			CPC_INFO("Boundary %08llx -> %08llx resolved through step %llu",
+				cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn,
+				cpc_track_pages.retinst);
+			cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
+				KVM_PAGE_TRACK_EXEC);
+			cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
+			cpc_track_pages.prev_avail = true;
+			cpc_track_pages.cur_gfn = cpc_track_pages.next_gfn;
+			cpc_track_pages.cur_avail = true;
+			cpc_track_pages.next_avail = false;
 		}
+
+		/* reset retinst to something realistic for a singlestep */
+		WARN_ON(cpc_track_pages.retinst > 300);
+		cpc_track_pages.retinst = 3;
+
 		break;
 	case CPC_TRACK_STEPS:
 		inst_gfn_seen = false;
@@ -3975,6 +3988,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cpc_rip_prev_set = false;
 		cpc_singlestep = true;
 		cpc_singlestep_reset = false;
+		CPC_DBG("Resetting singlestep timer %u", cpc_apic_timer);
 	}
 
 	if (cpc_long_step) {
@@ -3986,6 +4000,11 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	} else {
 		cpc_apic_oneshot = false;
 	}
+
+	/* leave this debug so that kernel does not optimize away
+	 * cpc_apic_oneshot even though its set to volatile ;( */
+	if (cpc_apic_oneshot)
+		CPC_DBG("Oneshot enabled\n");
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC);
 

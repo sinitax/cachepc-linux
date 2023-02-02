@@ -78,11 +78,7 @@
 	cmp $0, %al
 	je skip_apic_\name
 
-	mov $0, %rdx
-	mov cpc_apic_timer, %eax
-	mov $CPC_APIC_TIMER_SOFTDIV, %rbx
-	divq %rbx
-	mov %rax, %rdi
+	mov cpc_apic_timer, %edi
 	call cpc_apic_oneshot_run
 
 skip_apic_\name:

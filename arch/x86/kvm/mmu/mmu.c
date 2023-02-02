@@ -4002,13 +4002,26 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		if (!inst_fetch || !fault->present) return false;
 
-		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
-			fault->gfn, fault->error_code);
+		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u ret:%llu\n", count,
+			fault->gfn, fault->error_code, cpc_track_pages.retinst);
 
 		/* no conflict if next pagefault happens on a different inst */
-		if (cpc_track_pages.in_step && !cpc_singlestep
-				&& cpc_track_pages.retinst > 2)
+		if (cpc_track_pages.in_step && cpc_track_pages.retinst > 2) {
 			cpc_track_pages.in_step = false;
+			cpc_singlestep = false;
+
+			if (cpc_track_pages.cur_avail && cpc_track_pages.next_avail) {
+				CPC_INFO("Boundary %08llx -> %08llx resolved through fault",
+					cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn);
+				cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
+					KVM_PAGE_TRACK_EXEC);
+				cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
+				cpc_track_pages.prev_avail = true;
+				cpc_track_pages.cur_gfn = cpc_track_pages.next_gfn;
+				cpc_track_pages.cur_avail = true;
+				cpc_track_pages.next_avail = false;
+			}
+		}
 
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
@@ -4018,28 +4031,44 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 					cpc_track_pages.cur_gfn, modes[i]);
 				cpc_send_track_page_event(cpc_track_pages.cur_gfn,
 					fault->gfn, cpc_track_pages.retinst);
+				cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
+				cpc_track_pages.prev_avail = true;
 			}
 
 			cpc_track_pages.cur_gfn = fault->gfn;
 			cpc_track_pages.cur_avail = true;
+			cpc_track_pages.next_avail = false;
 			cpc_track_pages.retinst = 0;
 			cpc_track_pages.in_step = true;
 		} else {
-			/* not the main inst page but needed for reasons.. */
-			alloc = kmalloc(sizeof(struct cpc_fault), GFP_KERNEL);
-			BUG_ON(!alloc);
-			alloc->gfn = fault->gfn;
-			alloc->err = fault->error_code;
-			list_add_tail(&alloc->list, &cpc_faults);
+			WARN_ON(cpc_track_pages.next_avail);
+			if (cpc_track_pages.prev_avail
+					&& fault->gfn == cpc_track_pages.prev_gfn) {
+				/* instruction on boundary A -> B, but we
+				 * untracked A previously so now its being
+				 * retracked load the insrtuction.
+				 * reorder gfns chronologically */
+				cpc_track_pages.next_gfn = cpc_track_pages.cur_gfn;
+				cpc_track_pages.next_avail = true;
+				cpc_track_pages.cur_gfn = cpc_track_pages.prev_gfn;
+				cpc_track_pages.cur_avail = true;
+				cpc_track_pages.prev_avail = false;
+			} else {
+				/* instruction on boundary A -> B and both
+				 * pages need to be loaded simultaneously */
+				cpc_track_pages.next_gfn = fault->gfn;
+				cpc_track_pages.next_avail = true;
+				cpc_send_track_page_event(cpc_track_pages.cur_gfn,
+					cpc_track_pages.next_gfn,
+					cpc_track_pages.retinst);
+				cpc_track_pages.retinst = 0;
+			}
 
-			/* single step and retrack to resolve */
+			CPC_INFO("Instruction on boundary %08llx -> %08llx",
+				cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn);
+
 			cpc_singlestep_reset = true;
 		}
-
-		break;
-		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
-
-		if (!inst_fetch || !fault->present) return false;
 
 		break;
 	}
