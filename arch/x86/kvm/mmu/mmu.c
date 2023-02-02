@@ -3933,6 +3933,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	struct cpc_fault *tmp, *alloc;
 	size_t count, i;
 	bool inst_fetch;
+	bool is_prev_gfn;
 
 	for (i = 0; i < 3; i++) {
 		if (kvm_slot_page_track_is_active(vcpu->kvm,
@@ -4005,13 +4006,19 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u ret:%llu\n", count,
 			fault->gfn, fault->error_code, cpc_track_pages.retinst);
 
+		is_prev_gfn = (cpc_track_pages.prev_avail &&
+			fault->gfn == cpc_track_pages.prev_gfn);
+
 		/* no conflict if next pagefault happens on a different inst */
-		if (cpc_track_pages.in_step && cpc_track_pages.retinst > 2) {
+		if (cpc_track_pages.in_step && cpc_track_pages.retinst > 2 && !is_prev_gfn) {
 			cpc_track_pages.in_step = false;
 			cpc_singlestep = false;
 
+			if (cpc_track_pages.singlestep_resolve)
+				WARN_ON(cpc_track_pages.next_avail);
+
 			if (cpc_track_pages.cur_avail && cpc_track_pages.next_avail) {
-				CPC_INFO("Boundary %08llx -> %08llx resolved through fault",
+				CPC_INFO("Boundary %08llx -> %08llx resolved through fault\n",
 					cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn);
 				cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
 					KVM_PAGE_TRACK_EXEC);
@@ -4042,8 +4049,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cpc_track_pages.in_step = true;
 		} else {
 			WARN_ON(cpc_track_pages.next_avail);
-			if (cpc_track_pages.prev_avail
-					&& fault->gfn == cpc_track_pages.prev_gfn) {
+			if (is_prev_gfn) {
 				/* instruction on boundary A -> B, but we
 				 * untracked A previously so now its being
 				 * retracked load the insrtuction.
@@ -4064,10 +4070,11 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 				cpc_track_pages.retinst = 0;
 			}
 
-			CPC_INFO("Instruction on boundary %08llx -> %08llx",
+			CPC_INFO("Instruction on boundary %08llx -> %08llx\n",
 				cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn);
 
-			cpc_singlestep_reset = true;
+			if (cpc_track_pages.singlestep_resolve)
+				cpc_singlestep_reset = true;
 		}
 
 		break;

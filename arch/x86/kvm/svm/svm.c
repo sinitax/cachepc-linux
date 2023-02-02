@@ -2143,37 +2143,24 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		}
 	}
 
-	/* invalidate cached vmsa so rip is updated */
-	wbinvd();
-
 	if (sev_es_guest(vcpu->kvm)) {
+		/* invalidate cached vmsa so rip is updated */
+		wbinvd();
 		cpc_rip = svm->sev_es.vmsa->rip;
 	} else {
 		cpc_rip = kvm_rip_read(vcpu);
 	}
 
-	if (!cpc_rip_prev_set) {
-		cpc_rip_prev = cpc_rip;
-		cpc_rip_prev_set = true;
-	}
+	WARN_ON(!cpc_rip_prev_set);
 	if (cpc_rip == cpc_rip_prev) {
-		CPC_DBG("No RIP change (%llu,%u)\n",
+		CPC_DBG("No RIP change (%016llx,%u)\n",
 			cpc_rip, cpc_apic_timer);
 		cpc_apic_timer += 1;
 		return 1;
 	}
 	cpc_rip_prev = cpc_rip;
-	CPC_INFO("Detected RIP change! (%u)\n", cpc_apic_timer);
-
-	// if (!cpc_retinst_prev)
-	// 	cpc_retinst_prev = cpc_retinst;
-	// if (cpc_retinst_prev == cpc_retinst) {
-	// 	cpc_apic_timer += 1;
-	// 	return 1;
-	// }
-	// cpc_retinst_prev = cpc_retinst;
-	// CPC_INFO("Detected RETINST change! (%llu,%u)\n",
-	// 	cpc_retinst, cpc_apic_timer);
+	CPC_INFO("Detected RIP change! (%016llx,%u)\n",
+		cpc_rip, cpc_apic_timer);
 
 	count = 0;
 	list_for_each_entry(fault, &cpc_faults, list)
@@ -2186,7 +2173,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		cpc_singlestep = false;
 
 		if (cpc_track_pages.cur_avail && cpc_track_pages.next_avail) {
-			CPC_INFO("Boundary %08llx -> %08llx resolved through step %llu",
+			CPC_INFO("Boundary %08llx -> %08llx resolved through step %llu\n",
 				cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn,
 				cpc_track_pages.retinst);
 			cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
@@ -2199,7 +2186,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		}
 
 		/* reset retinst to something realistic for a singlestep */
-		WARN_ON(cpc_track_pages.retinst > 300);
+		WARN_ON(cpc_track_pages.retinst > 100);
 		cpc_track_pages.retinst = 3;
 
 		break;
@@ -3970,6 +3957,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
  	unsigned long vmcb_pa = svm->current_vmcb->pa;
 	int cpu;
 
+	/* vvv no print()s in guest state!!! vvv */
+
 	guest_state_enter_irqoff();
 
 	cpu = get_cpu();
@@ -3978,17 +3967,25 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	memset(cpc_msrmts, 0, L1_SETS);
 
 	if (cpc_singlestep_reset) {
-		if (cpc_apic_timer < CPC_APIC_TIMER_MIN) {
-			cpc_apic_timer = CPC_APIC_TIMER_MIN;
-		} else if (cpc_svm_exitcode == SVM_EXIT_NPF) {
-			cpc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
+		if (cpc_svm_exitcode == SVM_EXIT_NPF) {
+			cpc_apic_timer -= 5 * CPC_APIC_TIMER_SOFTDIV;
 		} else if (cpc_svm_exitcode == SVM_EXIT_INTR) {
-			cpc_apic_timer -= 30 * CPC_APIC_TIMER_SOFTDIV;
+			cpc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
 		}
-		cpc_rip_prev_set = false;
+		if (cpc_apic_timer < CPC_APIC_TIMER_MIN)
+			cpc_apic_timer = CPC_APIC_TIMER_MIN;
+
+		if (sev_es_guest(vcpu->kvm)) {
+			/* invalidate cached vmsa so rip is updated */
+			wbinvd();
+			cpc_rip_prev = svm->sev_es.vmsa->rip;
+		} else {
+			cpc_rip_prev = kvm_rip_read(vcpu);
+		}
+		cpc_rip_prev_set = true;
+
 		cpc_singlestep = true;
 		cpc_singlestep_reset = false;
-		CPC_DBG("Resetting singlestep timer %u", cpc_apic_timer);
 	}
 
 	if (cpc_long_step) {
@@ -4000,11 +3997,6 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	} else {
 		cpc_apic_oneshot = false;
 	}
-
-	/* leave this debug so that kernel does not optimize away
-	 * cpc_apic_oneshot even though its set to volatile ;( */
-	if (cpc_apic_oneshot)
-		CPC_DBG("Oneshot enabled\n");
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC);
 
@@ -4031,17 +4023,18 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	if (cpc_prime_probe)
 		cpc_save_msrmts(cpc_ds);
 
-	cpc_apic_oneshot = false;
-
-	if (cpc_track_mode == CPC_TRACK_PAGES)
-		cpc_track_pages.retinst += cpc_retinst;
-
-	if (!cpc_singlestep)
-		CPC_DBG("post vcpu_run\n");
+	if (cpc_track_mode == CPC_TRACK_PAGES && cpc_retinst > 0)
+		cpc_track_pages.retinst += cpc_retinst - 1;
 
 	put_cpu();
 
 	guest_state_exit_irqoff();
+
+	if (cpc_apic_oneshot)
+		CPC_DBG("Oneshot %u\n", cpc_apic_timer);
+	CPC_DBG("Post vcpu_run %llu\n", cpc_retinst);
+
+	cpc_apic_oneshot = false;
 }
 
 static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
