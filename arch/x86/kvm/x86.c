@@ -9525,7 +9525,7 @@ static int inject_pending_event(struct kvm_vcpu *vcpu, bool *req_immediate_exit)
 	}
 
 	/* Don't inject interrupts if the user asked to avoid doing so */
-	if (cpc_singlestep || (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ))
+	if (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ)
 		return 0;
 
 	/*

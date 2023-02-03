@@ -2085,36 +2085,10 @@ static int smi_interception(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-static void hexdump_diff(const uint8_t *old, const uint8_t *new, size_t size)
-{
-	size_t i;
-
-	if (!memcmp(old, new, size))
-		return;
-
-	printk("HEXDUMP DIFF\n");
-	for (i = 0; i < size; i++) {
-		if (i && i % 16 == 0)
-			printk(KERN_CONT "\n");
-		if (i % 16 == 0)
-			printk("%04lX: ", i);
-		if (old[i] != new[i])
-			printk(KERN_CONT "[%02X] ", old[i]);
-		else
-			printk(KERN_CONT " %02X  ", new[i]);
-	}
-	printk(KERN_CONT "\n");
-}
-
 static int intr_interception(struct kvm_vcpu *vcpu)
 {
-	static struct sev_es_save_area prev_vmsa;
-	static struct vcpu_svm prev_state;
-	static uint8_t ghcb_sa_buf[2* PAGE_SIZE];
-	struct vmcb_control_area *control;
 	struct vcpu_svm *svm;
 	struct cpc_fault *fault, *next;
-	uint64_t inst_gfn;
 	bool inst_gfn_seen;
 	size_t count;
 
@@ -2124,24 +2098,6 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		return 1;
 
 	svm = to_svm(vcpu);
-	control = &svm->vmcb->control;
-
-	if (cpc_loglevel >= CPC_LOGLVL_DBG && 0) {
-		hexdump_diff((const uint8_t *)&prev_vmsa,
-			(const uint8_t *)svm->sev_es.vmsa, sizeof(prev_vmsa));
-		memcpy(&prev_vmsa, svm->sev_es.vmsa, sizeof(prev_vmsa));
-
-		hexdump_diff((const uint8_t *)&prev_state,
-			(const uint8_t *)&svm->sev_es, sizeof(prev_state));
-		memcpy(&prev_state, &svm->sev_es, sizeof(prev_state));
-
-		if (svm->sev_es.ghcb_sa) {
-			hexdump_diff(ghcb_sa_buf,
-				(const uint8_t *)svm->sev_es.ghcb_sa,
-				sizeof(ghcb_sa_buf));
-			memcpy(ghcb_sa_buf, svm->sev_es.ghcb_sa, svm->sev_es.ghcb_sa_len);
-		}
-	}
 
 	if (sev_es_guest(vcpu->kvm)) {
 		/* invalidate cached vmsa so rip is updated */
@@ -2153,8 +2109,8 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	WARN_ON(!cpc_rip_prev_set);
 	if (cpc_rip == cpc_rip_prev) {
-		//CPC_DBG("No RIP change (%016llx,%u)\n",
-		//	cpc_rip, cpc_apic_timer);
+		CPC_DBG("No RIP change (%016llx,%u)\n",
+			cpc_rip, cpc_apic_timer);
 		cpc_apic_timer += 1;
 		return 1;
 	}
@@ -2194,20 +2150,12 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 		inst_gfn_seen = false;
 		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
 			if (!inst_gfn_seen && (fault->err & PFERR_FETCH_MASK)) {
-				inst_gfn = fault->gfn;
 				inst_gfn_seen = true;
 			}
 			if (!inst_gfn_seen && cpc_track_steps.use_filter) {
 				list_del(&fault->list);
 				kfree(fault);
 			}
-		}
-		WARN_ON(!inst_gfn_seen);
-		if (cpc_track_steps.use_target &&
-				inst_gfn != cpc_track_steps.target_gfn) {
-			cpc_track_steps.stepping = false;
-			cpc_prime_probe = false;
-			cpc_singlestep = false;
 		}
 		if (cpc_track_steps.stepping)
 			cpc_send_track_step_event(&cpc_faults);
@@ -3425,7 +3373,7 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (!cpc_singlestep && cpc_loglevel >= CPC_LOGLVL_DBG) {
+	if (cpc_loglevel >= CPC_LOGLVL_DBG) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
 				CPC_INFO("KVM EXIT (%s)\n", codelut[i].name);
@@ -3957,7 +3905,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
  	unsigned long vmcb_pa = svm->current_vmcb->pa;
 	int cpu;
 
-	/* vvv no print()s in guest state!!! vvv */
+	/* debug prints influence single-stepping */
+	//WARN_ON_ONCE(cpc_singlestep && cpc_loglevel >= CPC_LOGLVL_DBG);
 
 	guest_state_enter_irqoff();
 
@@ -4026,16 +3975,16 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	if (cpc_prime_probe)
 		cpc_save_msrmts(cpc_ds);
 
-	if (cpc_track_mode == CPC_TRACK_PAGES && cpc_retinst > 0)
+	if (cpc_track_mode == CPC_TRACK_PAGES && cpc_retinst >= 1)
 		cpc_track_pages.retinst += cpc_retinst - 1;
 
 	put_cpu();
 
 	guest_state_exit_irqoff();
 
-	//if (cpc_apic_oneshot)
-	//	CPC_DBG("Oneshot %i\n", cpc_apic_timer);
-	//CPC_DBG("Post vcpu_run %llu\n", cpc_retinst);
+	if (cpc_apic_oneshot)
+		CPC_DBG("Oneshot %i\n", cpc_apic_timer);
+	CPC_DBG("Post vcpu_run %llu\n", cpc_retinst);
 
 	cpc_apic_oneshot = false;
 }

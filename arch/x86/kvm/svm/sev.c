@@ -2466,12 +2466,11 @@ int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
 	mutex_lock(&kvm->lock);
 
 	/* Only the enc_context_owner handles some memory enc operations. */
-	(void) is_cmd_allowed_from_mirror;
-	// if (is_mirroring_enc_context(kvm) &&
-	//     !is_cmd_allowed_from_mirror(sev_cmd.id)) {
-	// 	r = -EINVAL;
-	// 	goto out;
-	// }
+	if (is_mirroring_enc_context(kvm) &&
+	    !is_cmd_allowed_from_mirror(sev_cmd.id)) {
+		r = -EINVAL;
+		goto out;
+	}
 
 	switch (sev_cmd.id) {
 	case KVM_SEV_SNP_INIT:
@@ -3258,8 +3257,6 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 	struct ghcb *ghcb;
 	u64 reason;
 
-	CPC_DBG("sev_es_validate_vgexit");
-
 	if (svm_map_ghcb(svm, &map))
 		return -EFAULT;
 
@@ -3300,13 +3297,12 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 			goto vmgexit_err;
 		break;
 	case SVM_EXIT_CPUID:
-		CPC_DBG("SVM_EXIT_CPUID %llu", ghcb_get_rax(ghcb));
-		// if (!ghcb_rax_is_valid(ghcb) ||
-		//     !ghcb_rcx_is_valid(ghcb))
-		// 	goto vmgexit_err;
-		// if (ghcb_get_rax(ghcb) == 0xd)
-		// 	if (!ghcb_xcr0_is_valid(ghcb))
-		// 		goto vmgexit_err;
+		if (!ghcb_rax_is_valid(ghcb) ||
+		    !ghcb_rcx_is_valid(ghcb))
+			goto vmgexit_err;
+		if (ghcb_get_rax(ghcb) == 0xd)
+			if (!ghcb_xcr0_is_valid(ghcb))
+				goto vmgexit_err;
 		break;
 	case SVM_EXIT_INVD:
 		break;
@@ -3330,7 +3326,7 @@ static int sev_es_validate_vmgexit(struct vcpu_svm *svm, u64 *exit_code)
 		}
 		break;
 	case SVM_EXIT_VMMCALL:
-		CPC_DBG("SVM_EXIT_CPUID %llu", ghcb_get_rax(ghcb));
+		CPC_DBG("SVM_EXIT_VMMCALL %llu", ghcb_get_rax(ghcb));
 		// if (!ghcb_rax_is_valid(ghcb) ||
 		//     !ghcb_cpl_is_valid(ghcb))
 		// 	goto vmgexit_err;
@@ -4284,8 +4280,6 @@ int sev_handle_vmgexit(struct kvm_vcpu *vcpu)
 	struct vmcb_control_area *control = &svm->vmcb->control;
 	u64 ghcb_gpa, exit_code;
 	int ret;
-
-	CPC_DBG("sev_handle_vgexit");
 
 	/* Validate the GHCB */
 	ghcb_gpa = control->ghcb_gpa;

@@ -47,6 +47,8 @@
  * ---------------------------------------------------------------------------
  */
 
+#include "../arch/x86/kvm/cachepc/cachepc.h"
+
 #include <crypto/aes.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -1218,7 +1220,7 @@ static void crypto_aes_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
 	put_unaligned_le32(b0[2], out + 8);
 	put_unaligned_le32(b0[3], out + 12);
 
-	CPC_DO_VMMCALL(SIGNAL, CPC_GUEST_STOP_TRACK, 0);
+	CPC_DO_VMMCALL(KVM_HC_CPC_VMMCALL_SIGNAL, CPC_GUEST_STOP_TRACK, 0);
 	put_cpu();
 }
 

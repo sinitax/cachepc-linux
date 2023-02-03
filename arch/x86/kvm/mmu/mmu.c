@@ -3935,14 +3935,15 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	bool inst_fetch;
 	bool is_prev_gfn;
 
+	CPC_DBG("Page fault (gfn:%08llx err:%u)\n",
+		fault->gfn, fault->error_code);
+
 	for (i = 0; i < 3; i++) {
 		if (kvm_slot_page_track_is_active(vcpu->kvm,
 				fault->slot, fault->gfn, modes[i]))
 			break;
 	}
 	if (i == 3) {
-		CPC_DBG("Untracked page fault (gfn:%08llx err:%u)\n",
-			fault->gfn, fault->error_code);
 		return false;
 	}
 
@@ -3966,23 +3967,44 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		else
 			BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
+		if (modes[i] == KVM_PAGE_TRACK_EXEC && !inst_fetch)
+			return false;
+
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u\n", count,
 			fault->gfn, fault->error_code);
 
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
-		if (!cpc_track_steps.stepping) {
-			if (!inst_fetch || !fault->present) return false;
-
-			if (fault->gfn == cpc_track_steps.target_gfn) {
-				cpc_track_steps.stepping = true;
-				if (cpc_track_steps.with_data) {
-					cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
-					cpc_track_all(vcpu, KVM_PAGE_TRACK_ACCESS);
-					cpc_untrack_single(vcpu, fault->gfn,
-						KVM_PAGE_TRACK_ACCESS);
-				}
+		if (cpc_track_steps.use_target && !cpc_track_steps.stepping
+				&& inst_fetch && fault->gfn == cpc_track_steps.target_gfn) {
+			CPC_INFO("Entering target gfn for stepping\n");
+			cpc_track_steps.stepping = true;
+			cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+			if (cpc_track_steps.with_data) {
+				cpc_track_all(vcpu, KVM_PAGE_TRACK_ACCESS);
+				cpc_untrack_single(vcpu, fault->gfn,
+					KVM_PAGE_TRACK_ACCESS);
+			} else {
+				cpc_track_all(vcpu, KVM_PAGE_TRACK_EXEC);
+				cpc_untrack_single(vcpu, fault->gfn,
+					KVM_PAGE_TRACK_EXEC);
 			}
+		} else if (cpc_track_steps.use_target && cpc_track_steps.stepping
+				&& inst_fetch && fault->gfn != cpc_track_steps.target_gfn) {
+			CPC_INFO("Leaving target gfn for stepping\n");
+			cpc_track_steps.stepping = false;
+			if (cpc_track_steps.with_data) {
+				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_ACCESS);
+			} else {
+				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+			}
+			cpc_track_all(vcpu, KVM_PAGE_TRACK_EXEC);
+			cpc_untrack_single(vcpu, fault->gfn,
+				KVM_PAGE_TRACK_EXEC);
+			cpc_singlestep = false;
+			cpc_prime_probe = false;
+			cpc_track_steps.prev_avail = false;
+			cpc_track_steps.cur_avail = false;
 		}
 
 		if (cpc_track_steps.stepping) {
@@ -3995,13 +4017,27 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cpc_singlestep_reset = true;
 			if (cpc_track_steps.with_data)
 				cpc_prime_probe = true;
+		} else {
+			if (cpc_track_steps.prev_avail) {
+				cpc_track_single(vcpu,
+					cpc_track_steps.prev_gfn, modes[i]);
+			}
+
+			if (cpc_track_steps.cur_avail) {
+				cpc_track_steps.prev_gfn = cpc_track_steps.cur_gfn;
+				cpc_track_steps.prev_avail = true;
+			}
+
+			cpc_track_steps.cur_gfn = fault->gfn;
+			cpc_track_steps.cur_avail = true;
 		}
 
 		break;
 	case CPC_TRACK_PAGES:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
-		if (!inst_fetch || !fault->present) return false;
+		if (!inst_fetch || !fault->present)
+			return false;
 
 		CPC_INFO("Got fault cnt:%lu gfn:%08llx err:%u ret:%llu\n", count,
 			fault->gfn, fault->error_code, cpc_track_pages.retinst);
