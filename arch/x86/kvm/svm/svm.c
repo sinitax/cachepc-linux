@@ -2126,7 +2126,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 	svm = to_svm(vcpu);
 	control = &svm->vmcb->control;
 
-	if (cpc_debug && 0) {
+	if (cpc_loglevel >= CPC_LOGLVL_DBG && 0) {
 		hexdump_diff((const uint8_t *)&prev_vmsa,
 			(const uint8_t *)svm->sev_es.vmsa, sizeof(prev_vmsa));
 		memcpy(&prev_vmsa, svm->sev_es.vmsa, sizeof(prev_vmsa));
@@ -2153,8 +2153,8 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	WARN_ON(!cpc_rip_prev_set);
 	if (cpc_rip == cpc_rip_prev) {
-		CPC_DBG("No RIP change (%016llx,%u)\n",
-			cpc_rip, cpc_apic_timer);
+		//CPC_DBG("No RIP change (%016llx,%u)\n",
+		//	cpc_rip, cpc_apic_timer);
 		cpc_apic_timer += 1;
 		return 1;
 	}
@@ -3425,7 +3425,7 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (cpc_debug) {
+	if (!cpc_singlestep && cpc_loglevel >= CPC_LOGLVL_DBG) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
 				CPC_INFO("KVM EXIT (%s)\n", codelut[i].name);
@@ -3967,13 +3967,13 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	memset(cpc_msrmts, 0, L1_SETS);
 
 	if (cpc_singlestep_reset) {
-		if (cpc_svm_exitcode == SVM_EXIT_NPF) {
-			cpc_apic_timer -= 5 * CPC_APIC_TIMER_SOFTDIV;
+		if (cpc_apic_timer < cpc_apic_timer_min) {
+			cpc_apic_timer = cpc_apic_timer_min;
+		} else if (cpc_svm_exitcode == SVM_EXIT_NPF) {
+			cpc_apic_timer -= cpc_apic_timer_dec_npf;
 		} else if (cpc_svm_exitcode == SVM_EXIT_INTR) {
-			cpc_apic_timer -= 10 * CPC_APIC_TIMER_SOFTDIV;
+			cpc_apic_timer -= cpc_apic_timer_dec_intr;
 		}
-		if (cpc_apic_timer < CPC_APIC_TIMER_MIN)
-			cpc_apic_timer = CPC_APIC_TIMER_MIN;
 
 		if (sev_es_guest(vcpu->kvm)) {
 			/* invalidate cached vmsa so rip is updated */
@@ -3997,6 +3997,9 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	} else {
 		cpc_apic_oneshot = false;
 	}
+
+	if (cpc_apic_timer < cpc_apic_timer_min)
+		cpc_apic_timer = cpc_apic_timer_min;
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC);
 
@@ -4030,9 +4033,9 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	guest_state_exit_irqoff();
 
-	if (cpc_apic_oneshot)
-		CPC_DBG("Oneshot %u\n", cpc_apic_timer);
-	CPC_DBG("Post vcpu_run %llu\n", cpc_retinst);
+	//if (cpc_apic_oneshot)
+	//	CPC_DBG("Oneshot %i\n", cpc_apic_timer);
+	//CPC_DBG("Post vcpu_run %llu\n", cpc_retinst);
 
 	cpc_apic_oneshot = false;
 }

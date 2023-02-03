@@ -4013,21 +4013,20 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		if (cpc_track_pages.in_step && cpc_track_pages.retinst > 2 && !is_prev_gfn) {
 			cpc_track_pages.in_step = false;
 			cpc_singlestep = false;
+		}
 
-			if (cpc_track_pages.singlestep_resolve)
-				WARN_ON(cpc_track_pages.next_avail);
-
-			if (cpc_track_pages.cur_avail && cpc_track_pages.next_avail) {
-				CPC_INFO("Boundary %08llx -> %08llx resolved through fault\n",
-					cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn);
-				cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
-					KVM_PAGE_TRACK_EXEC);
-				cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
-				cpc_track_pages.prev_avail = true;
-				cpc_track_pages.cur_gfn = cpc_track_pages.next_gfn;
-				cpc_track_pages.cur_avail = true;
-				cpc_track_pages.next_avail = false;
-			}
+		if (cpc_track_pages.cur_avail && cpc_track_pages.next_avail) {
+			WARN_ON(cpc_track_pages.singlestep_resolve);
+			CPC_INFO("Boundary %08llx -> %08llx resolved through fault\n",
+				cpc_track_pages.cur_gfn, cpc_track_pages.next_gfn);
+			cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
+				KVM_PAGE_TRACK_EXEC);
+			cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
+			cpc_track_pages.prev_avail = true;
+			cpc_track_pages.cur_gfn = cpc_track_pages.next_gfn;
+			cpc_track_pages.cur_avail = true;
+			cpc_track_pages.next_avail = false;
+			cpc_track_pages.in_step = false;
 		}
 
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
