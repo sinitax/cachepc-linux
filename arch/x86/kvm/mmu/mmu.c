@@ -3979,7 +3979,8 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 				&& inst_fetch && fault->gfn == cpc_track_steps.target_gfn) {
 			CPC_INFO("Entering target gfn for stepping\n");
 			cpc_track_steps.stepping = true;
-			cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
+			cpc_untrack_single(vcpu, fault->gfn,
+				KVM_PAGE_TRACK_EXEC);
 			if (cpc_track_steps.with_data) {
 				cpc_track_all(vcpu, KVM_PAGE_TRACK_ACCESS);
 				cpc_untrack_single(vcpu, fault->gfn,
@@ -3998,13 +3999,10 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			} else {
 				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_EXEC);
 			}
-			cpc_track_all(vcpu, KVM_PAGE_TRACK_EXEC);
-			cpc_untrack_single(vcpu, fault->gfn,
+			cpc_track_single(vcpu, cpc_track_steps.target_gfn,
 				KVM_PAGE_TRACK_EXEC);
 			cpc_singlestep = false;
 			cpc_prime_probe = false;
-			cpc_track_steps.prev_avail = false;
-			cpc_track_steps.cur_avail = false;
 		}
 
 		if (cpc_track_steps.stepping) {
@@ -4017,19 +4015,6 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cpc_singlestep_reset = true;
 			if (cpc_track_steps.with_data)
 				cpc_prime_probe = true;
-		} else {
-			if (cpc_track_steps.prev_avail) {
-				cpc_track_single(vcpu,
-					cpc_track_steps.prev_gfn, modes[i]);
-			}
-
-			if (cpc_track_steps.cur_avail) {
-				cpc_track_steps.prev_gfn = cpc_track_steps.cur_gfn;
-				cpc_track_steps.prev_avail = true;
-			}
-
-			cpc_track_steps.cur_gfn = fault->gfn;
-			cpc_track_steps.cur_avail = true;
 		}
 
 		break;
