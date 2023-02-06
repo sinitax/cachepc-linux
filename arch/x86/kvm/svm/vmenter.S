@@ -31,61 +31,63 @@
 
 #include "../cachepc/macro.S"
 
-.extern cpc_msrmts
-.extern cpc_regs_tmp
-.extern cpc_regs_vm
-
-.macro load_tmp off reg
-	mov cpc_regs_tmp+\off, \reg
-.endm
-
-.macro save_tmp off reg
-	mov \reg, cpc_regs_tmp+\off
-.endm
-
-.macro load_vm off reg
-	mov cpc_regs_vm+\off, \reg
-.endm
-
-.macro save_vm off reg
-	mov \reg, cpc_regs_vm+\off
-.endm
-
 .macro apply_regs func
-	\func 0x00 %rax
-	\func 0x08 %rbx
-	\func 0x10 %rcx
-	\func 0x18 %rdx
-	\func 0x20 %rbp
-	\func 0x28 %rsp
-	\func 0x30 %rdi
-	\func 0x38 %rsi
-	\func 0x40 %r8
-	\func 0x48 %r9
-	\func 0x50 %r10
-	\func 0x58 %r11
-	\func 0x60 %r12
-	\func 0x68 %r13
-	\func 0x70 %r14
-	\func 0x78 %r15
+	\func %rax %xmm0
+	\func %rbx %xmm1
+	\func %rcx %xmm2
+	\func %rdx %xmm3
+	\func %rbp %xmm4
+	\func %rsp %xmm5
+	\func %rdi %xmm6
+	\func %rsi %xmm7
+	\func %r8  %xmm8
+	\func %r9  %xmm9
+	\func %r10 %xmm10
+	\func %r11 %xmm11
+	\func %r12 %xmm12
+	\func %r13 %xmm13
+	\func %r14 %xmm14
+.endm
+
+.macro save_reg src dst
+	movq \src, \dst
+.endm
+
+.macro swap_reg src dst
+	movq \src, %r15
+	movq \dst, \src
+	movq %r15, \dst
+.endm
+
+.macro save_vm
+	apply_regs save_reg
+.endm
+
+.macro exit_vm
+	apply_regs swap_reg
+.endm
+
+.macro enter_vm
+	apply_regs swap_reg
+	movq %xmm15, %r15 # fixup tmp reg
 .endm
 
 .macro wrap_prime name
-	apply_regs save_vm
-	apply_regs load_tmp
+	exit_vm
 
 	# read vars before prime
 	xor %rax, %rax
 	movb cpc_apic_oneshot, %al
-	mov %rax, %r12
+	mov %rax, %r11
 	mov cpc_apic_timer, %eax
-	mov %rax, %r13
+	mov %rax, %r12
 	mov cpc_apic_timer_softdiv, %eax
-	mov %rax, %r14
+	mov %rax, %r13
 	movb cpc_prime_probe, %al
-	mov %rax, %r15
+	mov %rax, %r14
 
 	# do prime
+	mov %r14, %rax
 	cmp $0, %al
 	je skip_prime_\name
 	wbinvd
@@ -96,7 +98,7 @@
 skip_prime_\name:
 
 	# do oneshot
-	mov %r12, %rax
+	mov %r11, %rax
 	cmp $0, %al
 	je skip_apic_\name
 	# asm from cpc_apic_oneshot_run
@@ -105,28 +107,25 @@ skip_prime_\name:
 	mov $0x0b, %edx
 	mov %edx, 0xffffffffff5fd3e0
 	xor %edx, %edx
-	mov %r13, %rax
-	div %r14
+	mov %r12, %rax
+	div %r13
 	mov %eax, 0xffffffffff5fd380
 skip_apic_\name:
 
-	apply_regs save_tmp
-	apply_regs load_vm
+	enter_vm
 .endm
 
 .macro wrap_probe name
-	apply_regs save_vm
-	apply_regs load_tmp
+	exit_vm
 
 	# do probe
-	mov %r15, %rax
+	mov %r14, %rax
 	cmp $0, %al
 	je skip_probe_\name
 	probe \name %r8 %r9 %r10 %r11 %r12
 skip_probe_\name:
 
-	apply_regs save_tmp
-	apply_regs load_vm
+	enter_vm
 .endm
 
 
@@ -136,7 +135,7 @@ skip_probe_\name:
  * @regs:	unsigned long * (to guest registers)
  */
 SYM_FUNC_START(__svm_vcpu_run)
-	apply_regs save_tmp
+	save_vm
 
 	push %_ASM_BP
 #ifdef CONFIG_X86_64
@@ -269,7 +268,7 @@ SYM_FUNC_END(__svm_vcpu_run)
  * @vmcb_pa:	unsigned long
  */
 SYM_FUNC_START(__svm_sev_es_vcpu_run)
-	apply_regs save_tmp
+	save_vm
 
 	push %_ASM_BP
 #ifdef CONFIG_X86_64
