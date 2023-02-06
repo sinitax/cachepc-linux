@@ -3967,6 +3967,9 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		else
 			BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
 
+		//CPC_WARN("here\n");
+		//if (!fault->present) return false;
+
 		if (modes[i] == KVM_PAGE_TRACK_EXEC && !inst_fetch)
 			return false;
 

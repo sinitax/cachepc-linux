@@ -2109,14 +2109,24 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 
 	WARN_ON(!cpc_rip_prev_set);
 	if (cpc_rip == cpc_rip_prev) {
-		CPC_DBG("No RIP change (%016llx,%u)\n",
-			cpc_rip, cpc_apic_timer);
+		CPC_DBG("No RIP change (%016llx,%u,%llu)\n",
+			cpc_rip, cpc_apic_timer, cpc_retinst);
 		cpc_apic_timer += 1;
 		return 1;
 	}
 	cpc_rip_prev = cpc_rip;
-	CPC_INFO("Detected RIP change! (%016llx,%u)\n",
-		cpc_rip, cpc_apic_timer);
+	CPC_INFO("Detected RIP change! (%016llx,%u,%llu)\n",
+		cpc_rip, cpc_apic_timer, cpc_retinst);
+
+	// if (!cpc_retinst_prev)
+	// 	cpc_retinst_prev = cpc_retinst;
+	// if (cpc_retinst_prev == cpc_retinst) {
+	// 	cpc_apic_timer += 1;
+	// 	return 1;
+	// }
+	// cpc_retinst_prev = cpc_retinst;
+	// CPC_INFO("Detected RETINST change! (%016llx,%u,%llu)\n",
+	// 	cpc_rip, cpc_apic_timer, cpc_retinst);
 
 	count = 0;
 	list_for_each_entry(fault, &cpc_faults, list)
@@ -3373,10 +3383,11 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (cpc_loglevel >= CPC_LOGLVL_DBG) {
+	if (cpc_loglevel >= CPC_LOGLVL_INFO && exit_code != SVM_EXIT_INTR) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
-				CPC_INFO("KVM EXIT (%s)\n", codelut[i].name);
+				CPC_INFO("KVM EXIT %s (%u,%llu)\n",
+					codelut[i].name, cpc_apic_timer, cpc_retinst);
 		}
 	}
 
@@ -3932,6 +3943,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 			cpc_rip_prev = kvm_rip_read(vcpu);
 		}
 		cpc_rip_prev_set = true;
+		cpc_retinst_prev = 0;
 
 		cpc_singlestep = true;
 		cpc_singlestep_reset = false;
@@ -3939,7 +3951,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	if (cpc_long_step) {
 		WARN_ON(cpc_singlestep);
-		cpc_apic_timer = 500000 * CPC_APIC_TIMER_SOFTDIV;
+		cpc_apic_timer = 5000000;
 		cpc_apic_oneshot = true;
 	} else if (cpc_singlestep) {
 		cpc_apic_oneshot = true;
@@ -3984,7 +3996,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	if (cpc_apic_oneshot)
 		CPC_DBG("Oneshot %i\n", cpc_apic_timer);
-	CPC_DBG("Post vcpu_run %llu\n", cpc_retinst);
+	CPC_DBG("Retinst %llu\n", cpc_retinst);
 
 	cpc_apic_oneshot = false;
 }

@@ -74,27 +74,42 @@
 	apply_regs save_vm
 	apply_regs load_tmp
 
+	# read vars before prime
+	xor %rax, %rax
 	movb cpc_apic_oneshot, %al
-	cmp $0, %al
-	je skip_apic_\name
-
-	mov cpc_apic_timer, %edi
-	call cpc_apic_oneshot_run
-
-skip_apic_\name:
+	mov %rax, %r12
+	mov cpc_apic_timer, %eax
+	mov %rax, %r13
+	mov cpc_apic_timer_softdiv, %eax
+	mov %rax, %r14
 	movb cpc_prime_probe, %al
 	mov %rax, %r15
+
+	# do prime
 	cmp $0, %al
 	je skip_prime_\name
-
 	wbinvd
-
 	mov cpc_ds, %r9
 	prime \name %r9 %r10 %r8
 	prime 1_\name %r9 %r10 %r8
 	prime 2_\name %r9 %r10 %r8
-
 skip_prime_\name:
+
+	# do oneshot
+	mov %r12, %rax
+	cmp $0, %al
+	je skip_apic_\name
+	# asm from cpc_apic_oneshot_run
+	mov $0xec, %edx
+	mov %edx, 0xffffffffff5fd320
+	mov $0x0b, %edx
+	mov %edx, 0xffffffffff5fd3e0
+	xor %edx, %edx
+	mov %r13, %rax
+	div %r14
+	mov %eax, 0xffffffffff5fd380
+skip_apic_\name:
+
 	apply_regs save_tmp
 	apply_regs load_vm
 .endm
@@ -103,13 +118,13 @@ skip_prime_\name:
 	apply_regs save_vm
 	apply_regs load_tmp
 
+	# do probe
 	mov %r15, %rax
 	cmp $0, %al
 	je skip_probe_\name
-
 	probe \name %r8 %r9 %r10 %r11 %r12
-
 skip_probe_\name:
+
 	apply_regs save_tmp
 	apply_regs load_vm
 .endm
