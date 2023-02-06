@@ -179,15 +179,13 @@ SYM_FUNC_START(__svm_vcpu_run)
 	/* "POP" @vmcb to RAX. */
 	pop %_ASM_AX
 
-	/* Enter guest mode */
-	sti
-
-1:	
 	wrap_prime sev_vcpu_run
-	vmrun %_ASM_AX
-	wrap_probe sev_vcpu_run
 
+	sti
+1:	vmrun %_ASM_AX
 2:	cli
+
+	wrap_probe sev_vcpu_run
 
 #ifdef CONFIG_RETPOLINE
 	/* IMPORTANT: Stuff the RSB immediately after VM-Exit, before RET! */
@@ -285,16 +283,13 @@ SYM_FUNC_START(__svm_sev_es_vcpu_run)
 	/* Move @vmcb to RAX. */
 	mov %_ASM_ARG1, %_ASM_AX
 
-	/* Enter guest mode */
-	sti
-
-1:	
-
 	wrap_prime sev_es_vcpu_run
-	vmrun %_ASM_AX
-	wrap_probe sev_es_vcpu_run
 
+	sti
+1:	vmrun %_ASM_AX
 2:	cli
+
+	wrap_probe sev_es_vcpu_run
 
 #ifdef CONFIG_RETPOLINE
 	/* IMPORTANT: Stuff the RSB immediately after VM-Exit, before RET! */
