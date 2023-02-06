@@ -4025,9 +4025,6 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		break;
 	case CPC_TRACK_PAGES:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
-		/* future readers: ik this part is messy, but handling
-		 * instructions on page boundaries has many cases
-		 * when optimizing for the common case (not on boundary) */
 
 		if (!inst_fetch || !fault->present)
 			return false;

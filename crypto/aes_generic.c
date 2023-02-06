@@ -1140,6 +1140,8 @@ int crypto_aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
 {
 	struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
 
+	CPC_WARN("Set key\n");
+
 	return aes_expandkey(ctx, in_key, key_len);
 }
 EXPORT_SYMBOL_GPL(crypto_aes_set_key);
@@ -1177,13 +1179,6 @@ EXPORT_SYMBOL_GPL(crypto_aes_set_key);
 
 static void crypto_aes_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
 {
-	int cpu;
-
-	CPC_WARN("Running AES-Generic!");
-
-	cpu = get_cpu();
-	CPC_DO_VMMCALL(SIGNAL, CPC_GUEST_START_TRACK, 0);
-
 	const struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
 	u32 b0[4], b1[4];
 	const u32 *kp = ctx->key_enc + 4;
@@ -1204,24 +1199,46 @@ static void crypto_aes_encrypt(struct crypto_tfm *tfm, u8 *out, const u8 *in)
 		f_nround(b0, b1, kp);
 	}
 
-	f_nround(b1, b0, kp);
-	f_nround(b0, b1, kp);
-	f_nround(b1, b0, kp);
-	f_nround(b0, b1, kp);
-	f_nround(b1, b0, kp);
-	f_nround(b0, b1, kp);
-	f_nround(b1, b0, kp);
-	f_nround(b0, b1, kp);
-	f_nround(b1, b0, kp);
-	f_lround(b0, b1, kp);
+	CPC_WARN("Running AES-Generic! %08x %08x %08x %08x\n",
+		kp[0], kp[1], kp[2], kp[3]);
+
+	const u8 cpc_key[16] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+	if (1 || !memcmp(kp, cpc_key, 16)) {
+		spinlock_t lock;
+		spin_lock_init(&lock);
+		spin_lock_irq(&lock);
+		CPC_DO_VMMCALL(KVM_HC_CPC_VMMCALL_SIGNAL, CPC_GUEST_START_TRACK, 0);
+
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_lround(b0, b1, kp);
+
+		CPC_DO_VMMCALL(KVM_HC_CPC_VMMCALL_SIGNAL, CPC_GUEST_STOP_TRACK, 0);
+		spin_unlock_irq(&lock);
+	} else {
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_nround(b0, b1, kp);
+		f_nround(b1, b0, kp);
+		f_lround(b0, b1, kp);
+	}
 
 	put_unaligned_le32(b0[0], out);
 	put_unaligned_le32(b0[1], out + 4);
 	put_unaligned_le32(b0[2], out + 8);
 	put_unaligned_le32(b0[3], out + 12);
-
-	CPC_DO_VMMCALL(KVM_HC_CPC_VMMCALL_SIGNAL, CPC_GUEST_STOP_TRACK, 0);
-	put_cpu();
 }
 
 /* decrypt a block of text */
