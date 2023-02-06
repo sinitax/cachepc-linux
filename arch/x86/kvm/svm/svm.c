@@ -2163,12 +2163,22 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 				inst_gfn_seen = true;
 			}
 			if (!inst_gfn_seen && cpc_track_steps.use_filter) {
+				/* remove without retracking */
 				list_del(&fault->list);
 				kfree(fault);
 			}
 		}
-		if (cpc_track_steps.stepping)
-			cpc_send_track_step_event(&cpc_faults);
+
+		if (cpc_track_steps.target_user && !cpc_retinst_user) {
+			/* stop single-stepping until we leave this page */
+			CPC_INFO("Target page not userspace, skipping..\n");
+			cpc_singlestep = false;
+			cpc_prime_probe = false;
+			cpc_track_steps.stepping = false;
+			break;
+		}
+
+		cpc_send_track_step_event(&cpc_faults);
 		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
 			if (cpc_track_steps.with_data && cpc_track_steps.stepping)
 				cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
@@ -3383,7 +3393,7 @@ int svm_invoke_exit_handler(struct kvm_vcpu *vcpu, u64 exit_code)
 	if (!svm_check_exit_valid(exit_code))
 		return svm_handle_invalid_exit(vcpu, exit_code);
 
-	if (cpc_loglevel >= CPC_LOGLVL_INFO && exit_code != SVM_EXIT_INTR) {
+	if (cpc_loglevel >= CPC_LOGLVL_DBG && exit_code != SVM_EXIT_INTR) {
 		for (i = 0; i < sizeof(codelut) / sizeof(codelut[0]); i++) {
 			if (codelut[i].code == exit_code)
 				CPC_INFO("KVM EXIT %s (%u,%llu)\n",
@@ -3963,6 +3973,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		cpc_apic_timer = cpc_apic_timer_min;
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC);
+	cpc_retinst_user = cpc_read_pmc(CPC_RETINST_USER_PMC);
 
 	if (sev_es_guest(vcpu->kvm)) {
 		__svm_sev_es_vcpu_run(vmcb_pa);
@@ -3983,12 +3994,17 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	}
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC) - cpc_retinst;
+	cpc_retinst_user = cpc_read_pmc(CPC_RETINST_USER_PMC) - cpc_retinst_user;
 
 	if (cpc_prime_probe)
 		cpc_save_msrmts(cpc_ds);
 
-	if (cpc_track_mode == CPC_TRACK_PAGES && cpc_retinst >= 1)
-		cpc_track_pages.retinst += cpc_retinst - 1;
+	if (cpc_track_mode == CPC_TRACK_PAGES) {
+		if (cpc_retinst >= 1)
+			cpc_track_pages.retinst += cpc_retinst - 1;
+		if (cpc_retinst_user >= 1)
+			cpc_track_pages.retinst_user += cpc_retinst_user - 1;
+	}
 
 	put_cpu();
 

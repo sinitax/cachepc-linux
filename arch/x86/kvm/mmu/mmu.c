@@ -3978,9 +3978,10 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
-		if (cpc_track_steps.use_target && !cpc_track_steps.stepping
+		if (cpc_track_steps.use_target && !cpc_track_steps.in_target
 				&& inst_fetch && fault->gfn == cpc_track_steps.target_gfn) {
 			CPC_INFO("Entering target gfn for stepping\n");
+			cpc_track_steps.in_target = true;
 			cpc_track_steps.stepping = true;
 			cpc_untrack_single(vcpu, fault->gfn,
 				KVM_PAGE_TRACK_EXEC);
@@ -3993,9 +3994,10 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 				cpc_untrack_single(vcpu, fault->gfn,
 					KVM_PAGE_TRACK_EXEC);
 			}
-		} else if (cpc_track_steps.use_target && cpc_track_steps.stepping
+		} else if (cpc_track_steps.use_target && cpc_track_steps.in_target
 				&& inst_fetch && fault->gfn != cpc_track_steps.target_gfn) {
 			CPC_INFO("Leaving target gfn for stepping\n");
+			cpc_track_steps.in_target = false;
 			cpc_track_steps.stepping = false;
 			if (cpc_track_steps.with_data) {
 				cpc_untrack_all(vcpu, KVM_PAGE_TRACK_ACCESS);
@@ -4023,6 +4025,9 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		break;
 	case CPC_TRACK_PAGES:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_EXEC);
+		/* future readers: ik this part is messy, but handling
+		 * instructions on page boundaries has many cases
+		 * when optimizing for the common case (not on boundary) */
 
 		if (!inst_fetch || !fault->present)
 			return false;
@@ -4046,8 +4051,10 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			cpc_track_single(vcpu, cpc_track_pages.cur_gfn,
 				KVM_PAGE_TRACK_EXEC);
 			cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
+			cpc_track_pages.prev_err = cpc_track_pages.cur_err;
 			cpc_track_pages.prev_avail = true;
 			cpc_track_pages.cur_gfn = cpc_track_pages.next_gfn;
+			cpc_track_pages.cur_err = cpc_track_pages.next_err;
 			cpc_track_pages.cur_avail = true;
 			cpc_track_pages.next_avail = false;
 			cpc_track_pages.in_step = false;
@@ -4056,41 +4063,53 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		cpc_untrack_single(vcpu, fault->gfn, modes[i]);
 
 		if (!cpc_track_pages.in_step) {
+			/* assume instruction is not on page boundary,
+			 * retrack previous, keep current untracked.. */
 			if (cpc_track_pages.cur_avail) {
 				cpc_track_single(vcpu,
 					cpc_track_pages.cur_gfn, modes[i]);
 				cpc_send_track_page_event(cpc_track_pages.cur_gfn,
-					fault->gfn, cpc_track_pages.retinst);
+					fault->gfn, fault->error_code,
+					cpc_track_pages.retinst,
+					cpc_track_pages.retinst_user);
 				cpc_track_pages.prev_gfn = cpc_track_pages.cur_gfn;
+				cpc_track_pages.prev_err = cpc_track_pages.cur_err;
 				cpc_track_pages.prev_avail = true;
 			}
 
 			cpc_track_pages.cur_gfn = fault->gfn;
+			cpc_track_pages.cur_err = fault->error_code;
 			cpc_track_pages.cur_avail = true;
 			cpc_track_pages.next_avail = false;
 			cpc_track_pages.retinst = 0;
+			cpc_track_pages.retinst_user = 0;
 			cpc_track_pages.in_step = true;
 		} else {
 			WARN_ON(cpc_track_pages.next_avail);
 			if (is_prev_gfn) {
 				/* instruction on boundary A -> B, but we
 				 * untracked A previously so now its being
-				 * retracked load the insrtuction.
+				 * retracked to load the instruction.
 				 * reorder gfns chronologically */
 				cpc_track_pages.next_gfn = cpc_track_pages.cur_gfn;
+				cpc_track_pages.next_err = cpc_track_pages.cur_err;
 				cpc_track_pages.next_avail = true;
 				cpc_track_pages.cur_gfn = cpc_track_pages.prev_gfn;
+				cpc_track_pages.cur_err = cpc_track_pages.prev_err;
 				cpc_track_pages.cur_avail = true;
 				cpc_track_pages.prev_avail = false;
 			} else {
-				/* instruction on boundary A -> B and both
-				 * pages need to be loaded simultaneously */
+				/* instruction on boundary B -> C in order */
 				cpc_track_pages.next_gfn = fault->gfn;
+				cpc_track_pages.next_err = fault->error_code;
 				cpc_track_pages.next_avail = true;
 				cpc_send_track_page_event(cpc_track_pages.cur_gfn,
 					cpc_track_pages.next_gfn,
-					cpc_track_pages.retinst);
+					cpc_track_pages.cur_err,
+					cpc_track_pages.retinst,
+					cpc_track_pages.retinst_user);
 				cpc_track_pages.retinst = 0;
+				cpc_track_pages.retinst_user = 0;
 			}
 
 			CPC_INFO("Instruction on boundary %08llx -> %08llx\n",
