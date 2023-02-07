@@ -397,9 +397,9 @@ static inline void check_spte_writable_invariants(u64 spte)
 		WARN_ONCE(!(spte & shadow_host_writable_mask),
 			  "kvm: MMU-writable SPTE is not Host-writable: %llx",
 			  spte);
-	else
-		WARN_ONCE(is_writable_pte(spte),
-			  "kvm: Writable SPTE is not MMU-writable: %llx", spte);
+	//else /* cachepc: this is intended! we dont want to give mmu ctrl */
+	//	WARN_ONCE(is_writable_pte(spte),
+	//		  "kvm: Writable SPTE is not MMU-writable: %llx", spte);
 }
 
 static inline bool is_mmu_writable_spte(u64 spte)
