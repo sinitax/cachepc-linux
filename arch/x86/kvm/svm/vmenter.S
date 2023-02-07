@@ -289,6 +289,10 @@ SYM_FUNC_START(__svm_sev_es_vcpu_run)
 1:	vmrun %_ASM_AX
 2:	cli
 
+	# in sev-es the cpu register state is not restored after vmrun..
+	# xmm regs have been cleared so we need to do an extra accesses
+	movq cpc_ds_probe, %xmm8
+	movq cpc_prime_probe, %xmm14
 	wrap_probe sev_es_vcpu_run
 
 #ifdef CONFIG_RETPOLINE
