@@ -2178,7 +2178,7 @@ static int intr_interception(struct kvm_vcpu *vcpu)
 			break;
 		}
 
-		cpc_send_track_step_event(&cpc_faults);
+		cpc_send_track_step_event(&cpc_faults, cpc_guest_misses);
 		list_for_each_entry_safe(fault, next, &cpc_faults, list) {
 			if (cpc_track_steps.with_data && cpc_track_steps.stepping)
 				cpc_track_single(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS);
@@ -3974,6 +3974,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC);
 	cpc_retinst_user = cpc_read_pmc(CPC_RETINST_USER_PMC);
+	cpc_guest_misses = cpc_read_pmc(CPC_L1MISS_GUEST_PMC);
 
 	if (sev_es_guest(vcpu->kvm)) {
 		__svm_sev_es_vcpu_run(vmcb_pa);
@@ -3995,6 +3996,15 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 
 	cpc_retinst = cpc_read_pmc(CPC_RETINST_PMC) - cpc_retinst;
 	cpc_retinst_user = cpc_read_pmc(CPC_RETINST_USER_PMC) - cpc_retinst_user;
+	cpc_guest_misses = cpc_read_pmc(CPC_L1MISS_GUEST_PMC) - cpc_guest_misses;
+
+	if (cpc_baseline_measure && cpc_guest_misses < cpc_baseline_guest_misses)
+		cpc_baseline_guest_misses = cpc_guest_misses;
+
+	if (cpc_baseline_active) {
+		WARN_ON_ONCE(cpc_guest_misses < cpc_baseline_guest_misses);
+		cpc_guest_misses -= cpc_baseline_guest_misses;
+	}
 
 	if (cpc_prime_probe)
 		cpc_save_msrmts(cpc_ds);

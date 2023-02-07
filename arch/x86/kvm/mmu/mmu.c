@@ -3957,8 +3957,8 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	case CPC_TRACK_FAULT_NO_RUN:
 		BUG_ON(modes[i] != KVM_PAGE_TRACK_ACCESS);
 
-		cpc_send_track_step_event_single(
-			fault->gfn, fault->error_code, cpc_retinst);
+		cpc_send_track_step_event_single(fault->gfn, fault->error_code,
+			cpc_retinst, cpc_guest_misses);
 
 		return true;
 	case CPC_TRACK_STEPS:
