@@ -93,8 +93,6 @@
 	wbinvd
 	mov cpc_ds, %r9
 	prime \name %r9 %r10 %r8
-	prime 1_\name %r9 %r10 %r8
-	prime 2_\name %r9 %r10 %r8
 skip_prime_\name:
 
 	# do oneshot
@@ -122,7 +120,7 @@ skip_apic_\name:
 	mov %r14, %rax
 	cmp $0, %al
 	je skip_probe_\name
-	probe \name %r8 %r9 %r10 %r11 %r12
+	probe \name $CPC_L1MISS_PMC %r8 %r9 %r10 %r11 %r12
 skip_probe_\name:
 
 	enter_vm
